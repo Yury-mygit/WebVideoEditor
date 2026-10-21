@@ -1,0 +1,27 @@
+{
+  "name": "web-video-editor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SlideSub web: видео из статичных изображений и субтитров",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w web",
+    "test": "npm run test -w shared",
+    "guide:demo": "python tools/guide/make_demo.py",
+    "guide:shots": "npm run build && node tools/guide/screenshots.mjs && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "concurrently": "^10.0.6",
+    "puppeteer-core": "^25.15.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -10,6 +10,7 @@ import {
   DEFAULT_STYLE,
   formatAssTime,
   formatSrtTime,
+  newId,
   parseAss,
   parseSrt,
   parseTime,
@@ -97,4 +98,16 @@ test('cueIssues: пересечения, короткие, за пределам
   assert.deepEqual(issues.get(cues[0].id), ['overlap']);
   assert.deepEqual(issues.get(cues[1].id), ['short']);
   assert.deepEqual(issues.get(cues[2].id), ['out-of-range']);
+});
+
+test('newId работает и без crypto.randomUUID (сайт по http, не localhost)', () => {
+  const original = globalThis.crypto.randomUUID;
+  Object.defineProperty(globalThis.crypto, 'randomUUID', { value: undefined, configurable: true });
+  try {
+    const ids = new Set(Array.from({ length: 1000 }, () => newId()));
+    assert.equal(ids.size, 1000);
+    for (const id of ids) assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  } finally {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', { value: original, configurable: true });
+  }
 });

@@ -1,9 +1,9 @@
+import { newId } from './id';
 import { formatSrtTime, parseTime } from './time';
 import type { Cue } from './types';
 
 export type CueDraft = Omit<Cue, 'id'>;
 
-const newId = () => globalThis.crypto.randomUUID();
 
 export function withIds(drafts: CueDraft[]): Cue[] {
   return drafts.map((d) => ({ id: newId(), ...d }));

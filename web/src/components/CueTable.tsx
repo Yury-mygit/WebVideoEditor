@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { CUE_ISSUE_LABELS, sortCues, type Cue, type CueIssueKind, type Project } from '@wve/shared';
+import { CUE_ISSUE_LABELS, newId, sortCues, type Cue, type CueIssueKind, type Project } from '@wve/shared';
 import type { UpdateProject } from '../editor';
 import { TimeInput } from './TimeInput';
 
@@ -120,7 +120,7 @@ export function CueTable({ project, update, timeMs, onSeek, selectedIds, onSelec
 
   function addCue() {
     const start = Math.round(timeMs);
-    const cue: Cue = { id: crypto.randomUUID(), startMs: start, endMs: start + 2000, text: '' };
+    const cue: Cue = { id: newId(), startMs: start, endMs: start + 2000, text: '' };
     update((p) => ({ ...p, subtitles: sortCues([...p.subtitles, cue]) }));
     onSelect(new Set([cue.id]));
   }

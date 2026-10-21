@@ -1,3 +1,4 @@
+import { newId } from './id';
 import { msToFrame } from './time';
 import {
   PROJECT_FORMAT_VERSION,
@@ -69,7 +70,7 @@ export function normalizeProject(p: Partial<Project> & { meta?: Partial<Project[
 }
 
 export function createScene(image: string, durationMs: number): Scene {
-  return { id: globalThis.crypto.randomUUID(), image, durationMs, fit: 'cover', padColor: '#000000' };
+  return { id: newId(), image, durationMs, fit: 'cover', padColor: '#000000' };
 }
 
 export interface TimedScene {

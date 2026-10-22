@@ -10,16 +10,23 @@ import {
   DEFAULT_STYLE,
   formatAssTime,
   formatSrtTime,
+  frameAt,
+  layoutSegments,
   newId,
+  normalizeProject,
   parseAss,
   parseSrt,
   parseTime,
   parseTxt,
   serializeSrt,
+  segmentsFrames,
   sliceProject,
+  sliceSegments,
   splitEvenly,
   totalScenesMs,
+  validateProject,
   withIds,
+  type Project,
 } from './index';
 
 test('parseTime понимает разные форматы', () => {
@@ -86,6 +93,77 @@ test('sliceProject: обрезка сцен и сдвиг реплик', () => {
   assert.deepEqual(s.scenes.map((x) => x.durationMs), [1000, 3000]);
   assert.deepEqual(s.subtitles.map((c) => [c.startMs, c.endMs]), [[500, 2000]]);
   assert.equal(s.output.durationMs, 4000);
+});
+
+/** Три сцены по 4 с при 25 кадрах/с (по 100 кадров). */
+function threeScenes(): Project {
+  const p = createProject('t');
+  p.output.durationMs = 12_000;
+  p.scenes = ['a', 'b', 'c'].map((n) => createScene(n, 4000));
+  return p;
+}
+
+const describe = (p: Project) =>
+  layoutSegments(p).segments.map((s) =>
+    s.kind === 'still' ? `${s.scene.image}:${s.frames}` : `${s.from?.image ?? '#'}>${s.to?.image ?? '#'}:${s.frames}`,
+  );
+
+test('переходы: без настроек — только резкая смена, как раньше', () => {
+  const p = threeScenes();
+  assert.deepEqual(describe(p), ['a:100', 'b:100', 'c:100']);
+});
+
+test('переходы: проявление, плавный, через чёрный, затемнение — длительность не меняется', () => {
+  const p = threeScenes();
+  p.transitions = { ...p.transitions, fadeInMs: 1000, fadeOutMs: 2000, between: { type: 'crossfade', durationMs: 1000 } };
+  p.scenes[1].transition = { type: 'dip', durationMs: 2000 };
+  const { segments, shortened } = layoutSegments(p);
+  assert.deepEqual(describe(p), ['#>a:25', 'a:63', 'a>b:25', 'b:62', 'b>#:25', '#>c:25', 'c:25', 'c>#:50']);
+  assert.equal(segmentsFrames(segments), 300);
+  assert.deepEqual(shortened, []);
+  // Первый и последний кадры чёрные, на границе через чёрный — тоже.
+  assert.deepEqual(frameAt(segments, 0), { from: null, to: p.scenes[0], p: 0 });
+  assert.equal(frameAt(segments, 299)?.p, 1);
+  assert.equal(frameAt(segments, 199)?.to, null);
+  assert.equal(frameAt(segments, 199)?.p, 1);
+  assert.equal(frameAt(segments, 200)?.from, null);
+  assert.equal(frameAt(segments, 200)?.p, 0);
+  // Плавный переход (кадры 88…112) центрирован на границе сцен (кадр 100): ни 0, ни 1 на краях, монотонно.
+  const mid = [88, 100, 112].map((f) => frameAt(segments, f)!.p);
+  assert.ok(mid[0] > 0 && mid[0] < mid[1] && mid[1] < mid[2] && mid[2] < 1);
+  assert.ok(Math.abs(mid[1] - 0.5) < 0.02);
+});
+
+test('переходы: слишком короткая сцена — переходы укорачиваются, сумма кадров та же', () => {
+  const p = threeScenes();
+  p.scenes[1].durationMs = 400; // 10 кадров
+  p.output.durationMs = 8400;
+  p.transitions.between = { type: 'crossfade', durationMs: 2000 };
+  const { segments, shortened } = layoutSegments(p);
+  assert.deepEqual(shortened, [2]);
+  assert.equal(segmentsFrames(segments), 210);
+  assert.match(validateProject(p).map((i) => i.message).join('\n'), /короче своих переходов \(2\)/);
+});
+
+test('переходы: тестовый фрагмент с середины перехода продолжает его с нужной доли', () => {
+  const p = threeScenes();
+  p.transitions.between = { type: 'crossfade', durationMs: 1000 };
+  const all = layoutSegments(p).segments;
+  const part = sliceSegments(all, 95, 150);
+  assert.equal(segmentsFrames(part), 55);
+  for (const f of [0, 10, 30]) {
+    const a = frameAt(part, f)!;
+    const b = frameAt(all, 95 + f)!;
+    assert.equal(a.from, b.from);
+    assert.equal(a.to, b.to);
+    assert.ok(Math.abs(a.p - b.p) < 1e-9);
+  }
+});
+
+test('переходы: старый проект без настроек открывается с резкой сменой', () => {
+  const p = normalizeProject({ meta: { name: 'old' }, scenes: [createScene('a', 1000)] } as Partial<Project>);
+  assert.equal(p.transitions.between.type, 'cut');
+  assert.equal(p.transitions.fadeInMs, 0);
 });
 
 test('cueIssues: пересечения, короткие, за пределами', () => {

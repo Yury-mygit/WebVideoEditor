@@ -10,6 +10,8 @@ import {
   type FitMode,
   type Project,
   type Scene,
+  type TransitionSettings,
+  type TransitionType,
 } from '@wve/shared';
 import { api, assetUrl } from '../api';
 import { AUDIO_ACCEPT, assetLabel, isAudioFile } from '../audio';
@@ -29,6 +31,25 @@ interface Props {
 
 const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp';
 const FIT_LABELS: Record<FitMode, string> = { cover: 'Обрезать', contain: 'Вписать', stretch: 'Растянуть' };
+const TRANSITION_LABELS: Record<TransitionType, string> = { cut: 'Резко', crossfade: 'Плавно', dip: 'Через чёрный' };
+const DURATIONS_MS = [500, 1000, 1500, 2000, 3000, 5000];
+
+/** Длительность перехода из готового списка (значение, заданное через MCP, тоже показывается). */
+function DurationSelect(props: { valueMs: number; onChange: (ms: number) => void; allowZero?: boolean; title?: string }) {
+  const { valueMs, onChange, allowZero, title } = props;
+  const known = DURATIONS_MS.includes(valueMs) || (allowZero && valueMs === 0);
+  const options = known ? DURATIONS_MS : [...DURATIONS_MS, valueMs].sort((a, b) => a - b);
+  return (
+    <select value={valueMs} title={title} onChange={(e) => onChange(Number(e.target.value))}>
+      {allowZero && <option value={0}>нет</option>}
+      {options.map((ms) => (
+        <option key={ms} value={ms}>
+          {String(ms / 1000).replace('.', ',')} с
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onError, audioDurationMs }: Props) {
   const addInput = useRef<HTMLInputElement>(null);
@@ -47,6 +68,11 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
 
   const setScene = (id: string, patch: Partial<Scene>, key?: string) =>
     update((p) => ({ ...p, scenes: p.scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) }), key);
+
+  // ФТ-16: переходы проекта по умолчанию, проявление и затемнение.
+  const { transitions } = project;
+  const setTransitions = (patch: Partial<TransitionSettings>) =>
+    update((p) => ({ ...p, transitions: { ...p.transitions, ...patch } }));
 
   // Звуковая дорожка: идёт с начала ролика, всё, что длиннее ролика, при сборке отрезается.
   async function setAudioFile(file: File) {
@@ -152,6 +178,51 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
         />
       </label>
 
+      <div className="transitions">
+        <div className="field">
+          <span>Переход между сценами</span>
+          <div className="row">
+            <select
+              value={transitions.between.type}
+              onChange={(e) => setTransitions({ between: { ...transitions.between, type: e.target.value as TransitionType } })}
+            >
+              {Object.entries(TRANSITION_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+            {transitions.between.type !== 'cut' && (
+              <DurationSelect
+                title="Длительность перехода: половина до границы сцен, половина после"
+                valueMs={transitions.between.durationMs}
+                onChange={(ms) => setTransitions({ between: { ...transitions.between, durationMs: ms } })}
+              />
+            )}
+          </div>
+        </div>
+        <div className="row">
+          <label className="field">
+            <span>Проявление в начале</span>
+            <DurationSelect allowZero valueMs={transitions.fadeInMs} onChange={(ms) => setTransitions({ fadeInMs: ms })} />
+          </label>
+          <label className="field">
+            <span>Затемнение в конце</span>
+            <DurationSelect allowZero valueMs={transitions.fadeOutMs} onChange={(ms) => setTransitions({ fadeOutMs: ms })} />
+          </label>
+        </div>
+        {project.audio && (transitions.fadeInMs > 0 || transitions.fadeOutMs > 0) && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={transitions.fadeAudio}
+              onChange={(e) => setTransitions({ fadeAudio: e.target.checked })}
+            />{' '}
+            Звук тоже нарастает и затихает
+          </label>
+        )}
+      </div>
+
       {scenes.length === 0 && (
         <div className="empty-hint">Перетащите сюда картинки (JPG, PNG, WEBP) или нажмите «+ Изображения»</div>
       )}
@@ -207,6 +278,32 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
                   />
                 )}
               </div>
+              {i < scenes.length - 1 && (
+                <div className="row scene-transition" title="Переход к следующей сцене">
+                  <span className="muted">→</span>
+                  <select
+                    value={scene.transition?.type ?? 'default'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const durationMs = scene.transition?.durationMs ?? transitions.between.durationMs;
+                      setScene(scene.id, { transition: v === 'default' ? undefined : { type: v as TransitionType, durationMs } });
+                    }}
+                  >
+                    <option value="default">По умолчанию</option>
+                    {Object.entries(TRANSITION_LABELS).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                  {scene.transition && scene.transition.type !== 'cut' && (
+                    <DurationSelect
+                      valueMs={scene.transition.durationMs}
+                      onChange={(ms) => setScene(scene.id, { transition: { ...scene.transition!, durationMs: ms } })}
+                    />
+                  )}
+                </div>
+              )}
               <div className="row">
                 <button
                   className="small"

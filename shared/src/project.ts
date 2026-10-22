@@ -8,6 +8,7 @@ import {
   type RenderRange,
   type Scene,
   type SubtitleStyle,
+  type TransitionSettings,
 } from './types';
 
 export const DEFAULT_DURATION_MS = 90 * 60 * 1000;
@@ -45,11 +46,20 @@ export const DEFAULT_OUTPUT: OutputSettings = {
   durationMs: DEFAULT_DURATION_MS,
 };
 
+/** По умолчанию переходов нет — старые проекты собираются как раньше. */
+export const DEFAULT_TRANSITIONS: TransitionSettings = {
+  between: { type: 'cut', durationMs: 1000 },
+  fadeInMs: 0,
+  fadeOutMs: 0,
+  fadeAudio: true,
+};
+
 export function createProject(name: string): Project {
   return {
     meta: { formatVersion: PROJECT_FORMAT_VERSION, name, updatedAt: new Date().toISOString() },
     output: { ...DEFAULT_OUTPUT },
     scenes: [],
+    transitions: { ...DEFAULT_TRANSITIONS, between: { ...DEFAULT_TRANSITIONS.between } },
     audio: null,
     style: { ...DEFAULT_STYLE },
     subtitles: [],
@@ -63,6 +73,11 @@ export function normalizeProject(p: Partial<Project> & { meta?: Partial<Project[
     meta: { ...base.meta, ...p.meta },
     output: { ...base.output, ...p.output },
     scenes: p.scenes ?? [],
+    transitions: {
+      ...base.transitions,
+      ...p.transitions,
+      between: { ...base.transitions.between, ...p.transitions?.between },
+    },
     audio: p.audio ?? null,
     style: { ...base.style, ...p.style },
     subtitles: p.subtitles ?? [],

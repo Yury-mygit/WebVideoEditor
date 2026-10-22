@@ -1,4 +1,12 @@
-import { cueAt, horizontalMargin, sceneAt, type Project, type Scene, type SubtitleStyle } from '@wve/shared';
+import {
+  cueAt,
+  frameAt,
+  horizontalMargin,
+  type Project,
+  type Scene,
+  type Segment,
+  type SubtitleStyle,
+} from '@wve/shared';
 
 /**
  * Отрисовка кадра превью. Повторяет то, что делает libass при рендере:
@@ -128,18 +136,39 @@ export function drawSubtitles(ctx: CanvasRenderingContext2D, texts: string[], st
   }
 }
 
+/** Слой кадра: картинка сцены или чёрный (null). */
+function drawLayer(ctx: CanvasRenderingContext2D, scene: Scene | null, images: Map<string, HTMLImageElement>, w: number, h: number) {
+  const img = scene && images.get(scene.image);
+  if (scene && img?.complete) drawImage(ctx, img, scene, w, h);
+  else {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+/**
+ * Кадр превью. Переход рисуется так же, как смешивает FFmpeg (A·(1−p) + B·p):
+ * второй слой поверх первого с непрозрачностью p. Номер кадра — как при рендере.
+ */
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
   project: Project,
+  segments: readonly Segment[],
   timeMs: number,
   images: Map<string, HTMLImageElement>,
 ) {
-  const { width: w, height: h } = project.output;
+  const { width: w, height: h, fps } = project.output;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, w, h);
-  const scene = sceneAt(project.scenes, timeMs);
-  const img = scene && images.get(scene.scene.image);
-  if (scene && img?.complete) drawImage(ctx, img, scene.scene, w, h);
+  const look = frameAt(segments, Math.floor((timeMs * fps) / 1000 + 1e-6));
+  if (look) {
+    drawLayer(ctx, look.from, images, w, h);
+    if (look.p > 0) {
+      ctx.globalAlpha = look.p;
+      drawLayer(ctx, look.to, images, w, h);
+      ctx.globalAlpha = 1;
+    }
+  }
   const texts = cueAt(project.subtitles, timeMs).map((c) => c.text);
   drawSubtitles(ctx, texts, project.style, w, h);
 }

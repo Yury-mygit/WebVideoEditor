@@ -3,6 +3,15 @@ export const PROJECT_FORMAT_VERSION = 1;
 /** Режим подгонки изображения под кадр (ФТ-15). */
 export type FitMode = 'contain' | 'cover' | 'stretch';
 
+/** ФТ-16: резкая смена, плавное перетекание одной картинки в другую или смена через чёрный. */
+export type TransitionType = 'cut' | 'crossfade' | 'dip';
+
+export interface Transition {
+  type: TransitionType;
+  /** Полная длительность перехода; он идёт симметрично относительно границы сцен. */
+  durationMs: number;
+}
+
 export interface Scene {
   id: string;
   /** Имя файла в папке assets проекта. */
@@ -11,6 +20,19 @@ export interface Scene {
   fit: FitMode;
   /** Цвет полей для режима contain, #rrggbb. */
   padColor: string;
+  /** Переход к следующей сцене; не задан — переход проекта по умолчанию. */
+  transition?: Transition;
+}
+
+export interface TransitionSettings {
+  /** Переход между сценами по умолчанию. */
+  between: Transition;
+  /** Проявление из чёрного в начале ролика, мс (0 — нет). */
+  fadeInMs: number;
+  /** Затемнение в чёрный в конце ролика, мс (0 — нет). */
+  fadeOutMs: number;
+  /** Звук нарастает и затихает вместе с проявлением и затемнением. */
+  fadeAudio: boolean;
 }
 
 /** Реплика субтитров. Перенос строки в тексте — '\n'. */
@@ -66,7 +88,8 @@ export interface Project {
   meta: ProjectMeta;
   output: OutputSettings;
   scenes: Scene[];
-  /** Имя аудиофайла в assets (этап 3). */
+  transitions: TransitionSettings;
+  /** Имя аудиофайла в assets; звук идёт с начала ролика. */
   audio: string | null;
   style: SubtitleStyle;
   subtitles: Cue[];

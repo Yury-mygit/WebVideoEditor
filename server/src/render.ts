@@ -6,20 +6,26 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   buildAss,
+  buildSegments,
   msToFrame,
-  sceneTimeline,
   sliceProject,
+  sliceSegments,
   type Project,
   type RenderJobInfo,
   type RenderRange,
   type RenderStatus,
   type Scene,
+  type Segment,
 } from '@wve/shared';
 import { config, logsDir } from './config';
 import { projectDir } from './storage';
 
 interface Job extends RenderJobInfo {
+  /** Проект в пределах собираемого фрагмента (сцены, реплики, длительность). */
   project: Project;
+  /** Отрезки с переходами: считаются по всему проекту и режутся по фрагменту. */
+  segments: Segment[];
+  audioFilter: string | null;
   startedAt: number;
   child: ChildProcess | null;
   partFile: string;
@@ -37,7 +43,7 @@ renderEvents.setMaxListeners(100);
 
 const hexColor = (c: string) => '0x' + (/^#?([0-9a-f]{6})$/i.exec(c)?.[1] ?? '000000');
 
-function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: number): string {
+function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: number, label: string): string {
   const fit = {
     contain: `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=${hexColor(scene.padColor)}`,
     cover: `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`,
@@ -47,8 +53,34 @@ function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: 
   // это намного быстрее, чем декодировать картинку на каждом кадре.
   return (
     `[${input}:v]${fit},setsar=1,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,` +
-    `loop=loop=${frames - 1}:size=1:start=0,setpts=N/FRAME_RATE/TB[v${input}]`
+    `loop=loop=${frames - 1}:size=1:start=0,setpts=N/FRAME_RATE/TB[${label}]`
   );
+}
+
+function blackFilter(frames: number, w: number, h: number, fps: number, label: string): string {
+  return `color=c=black:s=${w}x${h}:r=${fps},format=yuv420p,trim=end_frame=${frames},setpts=N/FRAME_RATE/TB[${label}]`;
+}
+
+/**
+ * ФТ-16: громкость для проявления и затемнения во времени всего ролика.
+ * t в фильтре — время от начала собираемого фрагмента, startMs — его начало в ролике.
+ */
+export function audioFadeFilter(project: Project, startMs: number): string | null {
+  const { fadeInMs, fadeOutMs, fadeAudio } = project.transitions;
+  if (!fadeAudio || (!fadeInMs && !fadeOutMs)) return null;
+  const t = `(t+${startMs / 1000})`;
+  const terms: string[] = [];
+  if (fadeInMs) terms.push(`clip(${t}/${fadeInMs / 1000},0,1)`);
+  if (fadeOutMs) terms.push(`clip((${project.output.durationMs / 1000}-${t})/${fadeOutMs / 1000},0,1)`);
+  return `volume='${terms.join('*')}':eval=frame`;
+}
+
+export interface RenderOptions {
+  fontsDir: string | null;
+  /** С какого места звуковой дорожки начинать (для тестового фрагмента). */
+  audioStartMs: number;
+  /** Фильтр громкости для проявления и затемнения, если нужен. */
+  audioFilter: string | null;
 }
 
 /**
@@ -60,38 +92,49 @@ export function filterPath(p: string): string {
 }
 
 /**
- * Строит аргументы FFmpeg. Пути к материалам относительные: процесс запускается в папке проекта.
- * audioStartMs — с какого места звуковой дорожки начинать (для тестового фрагмента).
+ * Строит аргументы FFmpeg по раскладке на отрезки. Пути к материалам относительные:
+ * процесс запускается в папке проекта.
  */
 export function buildFfmpegArgs(
   project: Project,
+  segments: readonly Segment[],
   assRel: string,
   outRel: string,
-  fontsDir: string | null,
-  audioStartMs = 0,
+  { fontsDir, audioStartMs, audioFilter }: RenderOptions,
 ): string[] {
   const { width: w, height: h, fps } = project.output;
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
   const chains: string[] = [];
-  const timeline = sceneTimeline(project.scenes);
   let inputs = 0;
-  for (const t of timeline) {
-    // Границы сцен — на целых кадрах, чтобы смена была точной до кадра.
-    const frames = msToFrame(t.endMs, fps) - msToFrame(t.startMs, fps);
-    if (frames <= 0) continue;
-    args.push('-framerate', String(fps), '-i', `assets/${t.scene.image}`);
-    chains.push(sceneFilter(t.scene, inputs, frames, w, h));
-    inputs++;
-  }
-  if (!inputs) throw new Error('Нет сцен для рендера');
-  const labels = Array.from({ length: inputs }, (_, i) => `[v${i}]`).join('');
+  // Слой отрезка: картинка сцены (отдельный вход) или чёрный кадр.
+  const layer = (scene: Scene | null, frames: number, label: string) => {
+    if (!scene) return void chains.push(blackFilter(frames, w, h, fps, label));
+    args.push('-framerate', String(fps), '-i', `assets/${scene.image}`);
+    chains.push(sceneFilter(scene, inputs++, frames, w, h, label));
+  };
+  segments.forEach((s, i) => {
+    if (s.kind === 'still') return layer(s.scene, s.frames, `v${i}`);
+    // Переход: только кадры перехода, доля второго слоя растёт от кадра к кадру (N — номер кадра).
+    layer(s.from, s.frames, `a${i}`);
+    layer(s.to, s.frames, `b${i}`);
+    const p = `(${s.p0}+${s.step}*N)`;
+    chains.push(`[a${i}][b${i}]blend=all_expr='A*(1-${p})+B*${p}',setpts=N/FRAME_RATE/TB[v${i}]`);
+  });
+  if (!segments.length) throw new Error('Нет сцен для рендера');
+  const labels = segments.map((_, i) => `[v${i}]`).join('');
   const ass = `ass=${filterPath(assRel)}${fontsDir ? `:fontsdir=${filterPath(fontsDir)}` : ''}`;
-  chains.push(`${labels}concat=n=${inputs}:v=1:a=0,${ass}[out]`);
+  chains.push(`${labels}concat=n=${segments.length}:v=1:a=0,${ass}[out]`);
   // Звук начинается вместе с роликом; всё, что длиннее ролика, отрезается (-t на входе).
   const audio: string[] = [];
   if (project.audio) {
     args.push('-ss', String(audioStartMs / 1000), '-t', String(project.output.durationMs / 1000), '-i', `assets/${project.audio}`);
-    audio.push('-map', `${inputs}:a:0`, '-c:a', 'aac', '-b:a', '160k');
+    if (audioFilter) {
+      chains.push(`[${inputs}:a]${audioFilter}[aout]`);
+      audio.push('-map', '[aout]');
+    } else {
+      audio.push('-map', `${inputs}:a:0`);
+    }
+    audio.push('-c:a', 'aac', '-b:a', '160k');
   }
   args.push(
     '-filter_complex', chains.join(';'),
@@ -141,6 +184,11 @@ export async function enqueueRender(projectId: string, project: Project, range: 
   const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   const suffix = range ? '-test' : '';
   const fileName = `${safeFileBase(project.meta.name)}-${stamp}${suffix}.mp4`;
+  const { fps, durationMs } = project.output;
+  const allSegments = buildSegments(project);
+  const segments = range
+    ? sliceSegments(allSegments, msToFrame(range.startMs, fps), msToFrame(Math.min(durationMs, range.startMs + range.durationMs), fps))
+    : allSegments;
   const job: Job = {
     id,
     projectId,
@@ -152,6 +200,8 @@ export async function enqueueRender(projectId: string, project: Project, range: 
     fileName,
     range,
     project: range ? sliceProject(project, range) : project,
+    segments,
+    audioFilter: audioFadeFilter(project, range?.startMs ?? 0),
     startedAt: 0,
     child: null,
     assFile: path.join('renders', `${id}.ass`),
@@ -213,7 +263,11 @@ async function runJob(job: Job): Promise<void> {
 
   await fs.writeFile(path.join(cwd, job.assFile), buildAss(project.subtitles, project.style, project.output, project.meta.name), 'utf8');
   const fontsDir = existsSync(config.fontsDir) ? config.fontsDir : null;
-  const args = buildFfmpegArgs(project, job.assFile, job.partFile, fontsDir, job.range?.startMs ?? 0);
+  const args = buildFfmpegArgs(project, job.segments, job.assFile, job.partFile, {
+    fontsDir,
+    audioStartMs: job.range?.startMs ?? 0,
+    audioFilter: job.audioFilter,
+  });
   job.log.write(`[server] cwd: ${cwd}\n[server] ${config.ffmpegPath} ${args.map((a) => (/\s|;/.test(a) ? `"${a}"` : a)).join(' ')}\n\n`);
 
   const child = spawn(config.ffmpegPath, args, { cwd, windowsHide: true });

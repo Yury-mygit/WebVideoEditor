@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { formatSrtTime, type Project } from '@wve/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { buildSegments, formatSrtTime, type Project } from '@wve/shared';
 import { assetUrl } from '../api';
 import { drawFrame } from '../preview/draw';
 
@@ -45,10 +45,13 @@ export function Preview({ projectId, project, timeMs, onSeek, playing, onToggleP
     ).then(() => setFontsReady((n) => n + 1));
   }, [project.style.fontFamily]);
 
+  // Раскладка с переходами пересчитывается только при правке сцен или переходов, не на каждом кадре.
+  const segments = useMemo(() => buildSegments(project), [project.scenes, project.transitions, project.output]);
+
   useEffect(() => {
     const ctx = canvasRef.current?.getContext('2d');
-    if (ctx) drawFrame(ctx, project, timeMs, images);
-  }, [project, timeMs, images, version, fontsReady]);
+    if (ctx) drawFrame(ctx, project, segments, timeMs, images);
+  }, [project, segments, timeMs, images, version, fontsReady]);
 
   const { width, height, durationMs, fps } = project.output;
   const frameMs = 1000 / fps;

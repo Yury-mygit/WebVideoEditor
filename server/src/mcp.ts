@@ -15,6 +15,7 @@ import {
   type FitMode,
   type Project,
   type Scene,
+  type Transition,
 } from '@wve/shared';
 import { config } from './config';
 import { authEnabled } from './auth';
@@ -42,7 +43,13 @@ import {
  */
 
 const FIT = z.enum(['cover', 'contain', 'stretch']);
+const TRANSITION = z.object({
+  type: z.enum(['cut', 'crossfade', 'dip']).describe('cut — резко, crossfade — плавно, dip — через чёрный'),
+  durationSec: z.number().nonnegative().describe('Полная длительность: половина до границы сцен, половина после'),
+});
 const ms = (sec: number) => Math.round(sec * 1000);
+const sec = (msValue: number) => msValue / 1000;
+const transitionView = (t: Transition) => ({ type: t.type, durationSec: sec(t.durationMs) });
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] });
 const fail = (e: unknown) => ({
   isError: true,
@@ -106,7 +113,14 @@ function summary(project: Project, base: string, projectId: string) {
       durationSec: t.scene.durationMs / 1000,
       fit: t.scene.fit,
       padColor: t.scene.padColor,
+      ...(t.scene.transition ? { transition: transitionView(t.scene.transition) } : {}),
     })),
+    transitions: {
+      between: transitionView(project.transitions.between),
+      fadeInSec: sec(project.transitions.fadeInMs),
+      fadeOutSec: sec(project.transitions.fadeOutMs),
+      fadeAudio: project.transitions.fadeAudio,
+    },
     audio: project.audio,
     subtitlesCount: project.subtitles.length,
     style: project.style,
@@ -221,8 +235,10 @@ export function createMcpServer(base: string): McpServer {
     {
       title: 'Изменить проект',
       description:
-        'Меняет название, длительность, разрешение, частоту кадров, стиль субтитров, звуковую дорожку и/или список сцен. ' +
-        'scenes заменяет весь список (порядок, длительности, подгонка). splitEvenly делит длительность поровну, fitLastScene подгоняет последнюю сцену.',
+        'Меняет название, длительность, разрешение, частоту кадров, стиль субтитров, звуковую дорожку, переходы и/или список сцен. ' +
+        'scenes заменяет весь список (порядок, длительности, подгонка, переход к следующей сцене). ' +
+        'splitEvenly делит длительность поровну, fitLastScene подгоняет последнюю сцену. ' +
+        'Переходы не сдвигают тайминги: идут симметрично относительно границы сцен.',
       inputSchema: {
         projectId: z.string(),
         name: z.string().optional(),
@@ -260,9 +276,14 @@ export function createMcpServer(base: string): McpServer {
               durationSec: z.number().nonnegative().optional(),
               fit: FIT.optional(),
               padColor: z.string().optional(),
+              transition: TRANSITION.nullable().optional().describe('Переход к следующей сцене; null — как у проекта'),
             }),
           )
           .optional(),
+        transition: TRANSITION.optional().describe('Переход между сценами по умолчанию'),
+        fadeInSec: z.number().nonnegative().optional().describe('Проявление из чёрного в начале ролика, 0 — нет'),
+        fadeOutSec: z.number().nonnegative().optional().describe('Затемнение в чёрный в конце ролика, 0 — нет'),
+        fadeAudio: z.boolean().optional().describe('Звук нарастает и затихает вместе с проявлением и затемнением'),
         splitEvenly: z.boolean().optional(),
         fitLastScene: z.boolean().optional(),
         audio: z
@@ -279,22 +300,37 @@ export function createMcpServer(base: string): McpServer {
         if (!files.has(a.audio)) throw new HttpError(404, `Нет такого файла в проекте: ${a.audio}`);
         if (!AUDIO_EXTENSIONS.has(a.audio.slice(a.audio.lastIndexOf('.')).toLowerCase())) throw new HttpError(400, `Не аудиофайл: ${a.audio}`);
       }
-      let next: Project = { ...p, meta: { ...p.meta }, output: { ...p.output }, style: { ...p.style, ...(a.style ?? {}) } };
+      let next: Project = {
+        ...p,
+        meta: { ...p.meta },
+        output: { ...p.output },
+        style: { ...p.style, ...(a.style ?? {}) },
+        transitions: { ...p.transitions },
+      };
+      if (a.transition) next.transitions.between = { type: a.transition.type, durationMs: ms(a.transition.durationSec) };
+      if (a.fadeInSec !== undefined) next.transitions.fadeInMs = ms(a.fadeInSec);
+      if (a.fadeOutSec !== undefined) next.transitions.fadeOutMs = ms(a.fadeOutSec);
+      if (a.fadeAudio !== undefined) next.transitions.fadeAudio = a.fadeAudio;
       if (a.name) next.meta.name = a.name;
       if (a.durationSec) next.output.durationMs = ms(a.durationSec);
       if (a.width && a.height) Object.assign(next.output, { width: a.width, height: a.height });
       if (a.fps) next.output.fps = a.fps;
       if (a.audio !== undefined) next.audio = a.audio;
       if (a.scenes) {
+        const files = new Set((await listAssets(a.projectId)).map((f) => f.name));
+        for (const s of a.scenes) if (!files.has(s.image)) throw new HttpError(404, `Нет такого файла в проекте: ${s.image}`);
         const old = new Map(p.scenes.map((s) => [s.image, s]));
         next.scenes = a.scenes.map((s): Scene => {
           const prev = old.get(s.image) ?? createScene(s.image, 0);
-          return {
+          const scene: Scene = {
             ...prev,
             durationMs: s.durationSec !== undefined ? ms(s.durationSec) : prev.durationMs,
             fit: (s.fit as FitMode | undefined) ?? prev.fit,
             padColor: s.padColor ?? prev.padColor,
           };
+          if (s.transition === null) delete scene.transition;
+          else if (s.transition) scene.transition = { type: s.transition.type, durationMs: ms(s.transition.durationSec) };
+          return scene;
         });
       }
       if (a.splitEvenly) next = { ...next, scenes: splitEvenly(next.scenes, next.output) };

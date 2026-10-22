@@ -1,5 +1,6 @@
 import { formatHms } from './time';
 import { sortCues, totalScenesMs } from './project';
+import { layoutSegments } from './segments';
 import type { Cue, Project } from './types';
 
 export const MIN_CUE_MS = 1000;
@@ -57,6 +58,13 @@ export function validateProject(project: Project): ProjectIssue[] {
     issues.push({
       level: 'warning',
       message: `Сумма сцен (${formatHms(total)}) не совпадает с длительностью ролика (${formatHms(output.durationMs)})`,
+    });
+  }
+  const { shortened } = layoutSegments(project);
+  if (shortened.length) {
+    issues.push({
+      level: 'warning',
+      message: `Сцены короче своих переходов (${shortened.join(', ')}) — переходы будут укорочены`,
     });
   }
   const byKind = new Map<string, number>();

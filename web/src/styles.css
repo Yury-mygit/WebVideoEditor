@@ -347,6 +347,17 @@ legend {
 .scenes-summary.warn {
   color: var(--warn);
 }
+.transitions {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.transitions .row > .field {
+  flex: 1;
+}
+.scene-transition {
+  flex-wrap: wrap;
+}
 .audio-track {
   margin-top: 14px;
   padding-top: 10px;

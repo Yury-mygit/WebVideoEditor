@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { formatHms, sceneTimeline, type Project } from '@wve/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { buildSegments, formatHms, sceneTimeline, type Project } from '@wve/shared';
 import { assetLabel } from '../audio';
 
 interface Props {
@@ -43,6 +43,7 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
   const total = Math.max(1, project.output.durationMs);
   const audioRow = project.audio ? ROW_AUDIO + 4 : 0;
   const height = BASE_HEIGHT + audioRow;
+  const segments = useMemo(() => buildSegments(project), [project.scenes, project.transitions, project.output]);
 
   // Видимое окно: весь ролик или окно вокруг текущей позиции.
   const span = zoom && zoom < total ? zoom : total;
@@ -79,6 +80,26 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
       ctx.fillRect(x0, yScenes, Math.max(1, x1 - x0 - 1), ROW_SCENES);
       ctx.fillStyle = '#fff';
       if (x1 - x0 > 30) clippedText(ctx, `Сцена ${t.index + 1}`, x0 + 6, yScenes, x1 - x0 - 10, ROW_SCENES);
+    }
+
+    // Переходы поверх сцен: плавный — светлая полоса, через чёрный — затемнение к чёрному краю.
+    const { fps } = project.output;
+    let frame = 0;
+    for (const s of segments) {
+      const startMs = (frame * 1000) / fps;
+      frame += s.frames;
+      const endMs = (frame * 1000) / fps;
+      if (s.kind !== 'mix' || endMs < viewStart || startMs > viewEnd) continue;
+      const x0 = x(startMs);
+      const w = Math.max(2, x(endMs) - x0);
+      if (s.from && s.to) ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      else {
+        const g = ctx.createLinearGradient(x0, 0, x0 + w, 0);
+        g.addColorStop(0, `rgba(0,0,0,${s.from ? 0 : 0.8})`);
+        g.addColorStop(1, `rgba(0,0,0,${s.to ? 0 : 0.8})`);
+        ctx.fillStyle = g;
+      }
+      ctx.fillRect(x0, yScenes, w, ROW_SCENES);
     }
 
     // Звук начинается с нуля; пока длина файла неизвестна, рисуем его на весь ролик.
@@ -126,7 +147,7 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
     const px = x(timeMs);
     ctx.fillStyle = '#ff4040';
     ctx.fillRect(px - 1, 0, 2, height);
-  }, [project.scenes, project.subtitles, project.audio, audioDurationMs, total, height, audioRow, timeMs, width, span, viewStart, selectedIds, issueIds]);
+  }, [project.scenes, project.subtitles, project.audio, project.output, segments, audioDurationMs, total, height, audioRow, timeMs, width, span, viewStart, selectedIds, issueIds]);
 
   const seekFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();

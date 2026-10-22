@@ -51,7 +51,15 @@ function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: 
   );
 }
 
-/** Строит аргументы FFmpeg. Все пути относительные: процесс запускается в папке проекта. */
+/**
+ * Путь внутри описания фильтра FFmpeg: прямые слэши, «:» экранируется (C:/… на Windows),
+ * значение в одинарных кавычках — так его не разбивают ни разделители опций, ни граф фильтров.
+ */
+export function filterPath(p: string): string {
+  return `'${p.replace(/\\/g, '/').replace(/'/g, '').replace(/:/g, '\\:')}'`;
+}
+
+/** Строит аргументы FFmpeg. Пути к материалам относительные: процесс запускается в папке проекта. */
 export function buildFfmpegArgs(project: Project, assRel: string, outRel: string, fontsDir: string | null): string[] {
   const { width: w, height: h, fps } = project.output;
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
@@ -68,7 +76,7 @@ export function buildFfmpegArgs(project: Project, assRel: string, outRel: string
   }
   if (!inputs) throw new Error('Нет сцен для рендера');
   const labels = Array.from({ length: inputs }, (_, i) => `[v${i}]`).join('');
-  const ass = `ass=${assRel.replace(/\\/g, '/')}${fontsDir ? `:fontsdir=${fontsDir.replace(/\\/g, '/')}` : ''}`;
+  const ass = `ass=${filterPath(assRel)}${fontsDir ? `:fontsdir=${filterPath(fontsDir)}` : ''}`;
   chains.push(`${labels}concat=n=${inputs}:v=1:a=0,${ass}[out]`);
   args.push(
     '-filter_complex', chains.join(';'),
@@ -188,7 +196,7 @@ async function runJob(job: Job): Promise<void> {
   emit(job);
 
   await fs.writeFile(path.join(cwd, job.assFile), buildAss(project.subtitles, project.style, project.output, project.meta.name), 'utf8');
-  const fontsDir = config.fontsDir ?? (existsSync(path.join(cwd, 'fonts')) ? 'fonts' : null);
+  const fontsDir = existsSync(config.fontsDir) ? config.fontsDir : null;
   const args = buildFfmpegArgs(project, job.assFile, job.partFile, fontsDir);
   job.log.write(`[server] cwd: ${cwd}\n[server] ${config.ffmpegPath} ${args.map((a) => (/\s|;/.test(a) ? `"${a}"` : a)).join(' ')}\n\n`);
 

@@ -3,7 +3,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
-import { validateProject, type Project, type RenderRange } from '@wve/shared';
+import { buildAss, serializeSrt, validateProject, type Project, type RenderRange } from '@wve/shared';
+import { authEnabled, authStatus, login, logout, requireAuth } from './auth';
+import { handleMcp } from './mcp';
 import { config } from './config';
 import { cancelRender, enqueueRender, ffmpegVersion, getJob, getJobFile, listJobs, renderEvents } from './render';
 import {
@@ -11,10 +13,15 @@ import {
   assetPath,
   assetsDir,
   createNewProject,
+  downloadToAssets,
+  importSubtitlesFromAsset,
+  listAssets,
   listProjects,
+  listResults,
   loadProject,
   makeAssetName,
   missingAssets,
+  resultPath,
   saveProject,
 } from './storage';
 
@@ -25,10 +32,19 @@ type Handler = (req: Request, res: Response) => Promise<unknown>;
 const h = (fn: Handler) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 const param = (req: Request, name: string) => String(req.params[name]);
 
+// ---------- Без авторизации: проверка, вход, шрифты для превью ----------
 app.get(
   '/api/health',
-  h(async (_req, res) => res.json({ ok: true, ffmpeg: await ffmpegVersion() })),
+  h(async (_req, res) => res.json({ ok: true, auth: authEnabled(), ffmpeg: await ffmpegVersion() })),
 );
+app.get('/api/auth/status', authStatus);
+app.post('/api/auth/login', login);
+app.post('/api/auth/logout', logout);
+app.use('/fonts', express.static(config.fontsDir, { maxAge: '7d' }));
+
+// ---------- Дальше всё под паролем (кука браузера или Authorization: Bearer) ----------
+app.use('/api', requireAuth);
+app.all('/mcp', requireAuth, h(handleMcp));
 
 app.get(
   '/api/projects',
@@ -90,6 +106,62 @@ app.post(
   h(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Файл не передан');
     res.status(201).json({ name: req.file.filename, size: req.file.size });
+  }),
+);
+
+app.get(
+  '/api/projects/:id/assets',
+  h(async (req, res) => res.json(await listAssets(param(req, 'id')))),
+);
+
+/** Сервер сам скачивает материал по ссылке: {"url": "...", "fileName": "необязательно.jpg"}. */
+app.post(
+  '/api/projects/:id/assets/from-url',
+  h(async (req, res) =>
+    res.status(201).json(await downloadToAssets(param(req, 'id'), String(req.body?.url ?? ''), req.body?.fileName)),
+  ),
+);
+
+/** Импорт субтитров из загруженного файла: {"assetName": "...", "txtMode": "chars" | "even"}. */
+app.post(
+  '/api/projects/:id/subtitles/import',
+  h(async (req, res) => {
+    const { project, count, format } = await importSubtitlesFromAsset(
+      param(req, 'id'),
+      String(req.body?.assetName ?? ''),
+      req.body?.txtMode === 'even' ? 'even' : 'chars',
+    );
+    res.json({ imported: count, format, issues: validateProject(project) });
+  }),
+);
+
+app.get(
+  '/api/projects/:id/subtitles/:format',
+  h(async (req, res) => {
+    const project = await loadProject(param(req, 'id'));
+    const format = param(req, 'format');
+    if (format !== 'srt' && format !== 'ass') throw new HttpError(400, 'Формат: srt или ass');
+    const body =
+      format === 'srt'
+        ? serializeSrt(project.subtitles)
+        : buildAss(project.subtitles, project.style, project.output, project.meta.name);
+    const name = encodeURIComponent(`${project.meta.name || 'subtitles'}.${format}`);
+    res.set('Content-Type', 'text/plain; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename*=UTF-8''${name}`);
+    res.send('﻿' + body);
+  }),
+);
+
+/** Готовые ролики проекта (с диска) и их скачивание. */
+app.get(
+  '/api/projects/:id/results',
+  h(async (req, res) => res.json(await listResults(param(req, 'id')))),
+);
+app.get(
+  '/api/projects/:id/results/:name',
+  h(async (req, res) => {
+    const name = param(req, 'name');
+    res.download(resultPath(param(req, 'id'), name), name);
   }),
 );
 
@@ -174,6 +246,9 @@ app.listen(config.port, config.host, async (err?: Error) => {
     process.exit(1);
   }
   console.log(`SlideSub server: http://${config.host}:${config.port}`);
+  if (!config.password) console.warn('ВНИМАНИЕ: SLIDESUB_PASSWORD не задан — доступ к API и MCP открыт всем.');
+  else if (!/^[\x21-\x7e]+$/.test(config.password))
+    console.warn('ВНИМАНИЕ: в SLIDESUB_PASSWORD есть не-латинские символы или пробелы — заголовок Authorization их не передаст.');
   console.log(`Данные: ${config.dataDir}`);
   console.log(`FFmpeg: ${await ffmpegVersion()}`);
 });

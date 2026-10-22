@@ -54,11 +54,76 @@ npm run guide:shots   # сборка, прогон сценария в headless 
 
 | Переменная    | По умолчанию | Назначение |
 |---------------|--------------|------------|
-| `PORT`        | `3001`       | Порт API |
+| `PORT`        | `3001`       | Порт (веб-интерфейс, API и MCP — на одном порту) |
 | `HOST`        | `127.0.0.1`  | Интерфейс; для удалённого сервера — `0.0.0.0` |
 | `DATA_DIR`    | `./data`     | Проекты, загруженные файлы, готовые ролики, логи |
-| `FFMPEG_PATH` | из npm-пакета | Свой FFmpeg (на Linux-сервере лучше системный свежий) |
-| `FONTS_DIR`   | —            | Папка со шрифтами для libass (на сервере нужны те же шрифты, что выбраны в стиле) |
+| `SLIDESUB_PASSWORD` | —      | Общий пароль. Не задан — доступ открыт всем (только для локальной работы). Латиница, цифры и знаки, без пробелов |
+| `PUBLIC_URL`  | из запроса   | Внешний адрес для ссылок в ответах MCP, например `http://server:9100` |
+| `FFMPEG_PATH` | из npm-пакета | Свой FFmpeg, например системный `/usr/bin/ffmpeg` |
+| `FONTS_DIR`   | `./fonts`    | Шрифты для субтитров при сборке. По умолчанию — PT Sans из репозитория, от шрифтов ОС не зависит |
+
+## Пароль
+
+Если задан `SLIDESUB_PASSWORD`, всё, кроме страницы инструкции и шрифтов, закрыто:
+
+- **Браузер.** Сначала окно входа; после входа ставится кука на 30 дней, кнопка «Выйти» — в редакторе.
+  Если сессия истекла во время работы, окно входа показывается поверх редактора, несохранённые правки не теряются.
+- **curl, скрипты, MCP.** Заголовок `Authorization: Bearer <пароль>`.
+- Неверный пароль — 401; больше 10 ошибок в минуту с одного адреса — 429.
+- Соединение идёт по HTTP без шифрования. Внутри корпоративной сети это приемлемо; наружу сервер без HTTPS не открывать.
+
+## MCP (работа через Claude)
+
+На том же порту — `POST /mcp` (Streamable HTTP, без сессий). Подключение Claude Code:
+
+```bash
+claude mcp add --transport http slidesub http://server:9100/mcp --header "Authorization: Bearer <пароль>"
+```
+
+Инструменты: `list_projects`, `create_project`, `get_project`, `update_project` (название, длительность, разрешение,
+стиль, сцены), `list_assets`, `import_asset_from_url`, `add_scenes`, `import_subtitles`, `get_subtitles`,
+`edit_subtitles`, `check_project`, `start_render`, `render_status`, `cancel_render`, `list_results`.
+
+Файлы через MCP не передаются (это неэффективно для картинок и видео) — инструменты возвращают готовые команды:
+
+```bash
+# загрузить материал (картинка JPG/PNG/WEBP или субтитры SRT/ASS/TXT); ответ — {"name": "..."}
+curl -H "Authorization: Bearer $SLIDESUB_PASSWORD" -F "file=@photo.jpg" http://server:9100/api/projects/<id>/assets
+# скачать готовое видео
+curl -H "Authorization: Bearer $SLIDESUB_PASSWORD" -o video.mp4 "http://server:9100/api/projects/<id>/results/<имя файла>"
+```
+
+Сервер также умеет сам скачать материал по ссылке (`import_asset_from_url`).
+
+REST для скриптов: `GET /api/projects/:id/assets`, `POST /api/projects/:id/assets/from-url`,
+`POST /api/projects/:id/subtitles/import`, `GET /api/projects/:id/subtitles/srt|ass`,
+`GET /api/projects/:id/results`, `GET /api/projects/:id/results/:name`.
+
+## Развёртывание на Linux
+
+```bash
+git clone git@github.com:Yury-mygit/WebVideoEditor.git && cd WebVideoEditor
+npm ci                 # ставит и FFmpeg для linux-x64 (@ffmpeg-installer)
+npm run build
+SLIDESUB_PASSWORD='...' HOST=0.0.0.0 PORT=9100 PUBLIC_URL=http://server:9100 npm start
+```
+
+Пример службы systemd (`/etc/systemd/system/slidesub.service`):
+
+```ini
+[Service]
+WorkingDirectory=/opt/WebVideoEditor
+Environment=HOST=0.0.0.0 PORT=9100 DATA_DIR=/var/lib/slidesub PUBLIC_URL=http://server:9100
+EnvironmentFile=/etc/slidesub.env      # SLIDESUB_PASSWORD=...
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+```
+
+Проверка развёрнутого сервера «от и до» (создаёт проект, загружает демо-материалы, собирает видео, скачивает MP4 и SRT):
+
+```bash
+SLIDESUB_URL=http://server:9100 SLIDESUB_PASSWORD='...' npm run smoke
+```
 
 ## Данные
 

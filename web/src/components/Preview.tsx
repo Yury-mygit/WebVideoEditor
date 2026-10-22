@@ -38,7 +38,11 @@ export function Preview({ projectId, project, timeMs, onSeek, playing, onToggleP
   const [fontsReady, setFontsReady] = useState(0);
 
   useEffect(() => {
-    document.fonts.ready.then(() => setFontsReady((v) => v + 1));
+    // Шрифт для canvas сам не подгружается — запрашиваем все начертания явно.
+    const family = project.style.fontFamily;
+    Promise.allSettled(
+      ['', 'bold ', 'italic ', 'italic bold '].map((v) => document.fonts.load(`${v}32px "${family}"`, 'Аа')),
+    ).then(() => setFontsReady((n) => n + 1));
   }, [project.style.fontFamily]);
 
   useEffect(() => {

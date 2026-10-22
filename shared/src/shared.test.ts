@@ -62,7 +62,7 @@ test('buildAss: стиль, цвета, экранирование', () => {
   assert.equal(assColor('#112233', 0.5), '&H80332211');
   const ass = buildAss(withIds([{ startMs: 0, endMs: 1000, text: 'a{b}\nc' }]), DEFAULT_STYLE, DEFAULT_OUTPUT);
   assert.match(ass, /PlayResX: 1920/);
-  assert.match(ass, /Style: Default,Arial,54,&H00FFFFFF/);
+  assert.match(ass, /Style: Default,PT Sans,54,&H00FFFFFF/);
   assert.match(ass, /Dialogue: 0,0:00:00\.00,0:00:01\.00,Default,,0,0,0,,a\(b\)\\Nc/);
 });
 

@@ -19,7 +19,7 @@ export const RESOLUTIONS = [
 ] as const;
 
 export const DEFAULT_STYLE: SubtitleStyle = {
-  fontFamily: 'Arial',
+  fontFamily: 'PT Sans',
   fontSize: 54,
   bold: false,
   italic: false,

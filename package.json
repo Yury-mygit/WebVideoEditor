@@ -15,7 +15,8 @@
     "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w web",
     "test": "npm run test -w shared",
     "guide:demo": "python tools/guide/make_demo.py",
-    "guide:shots": "npm run build && node tools/guide/screenshots.mjs && npm run build"
+    "guide:shots": "npm run build && node tools/guide/screenshots.mjs && npm run build",
+    "smoke": "node tools/mcp-smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

@@ -6,7 +6,8 @@ interface Props {
   update: UpdateProject;
 }
 
-const FONTS = ['Arial', 'Verdana', 'Tahoma', 'Segoe UI', 'Calibri', 'Trebuchet MS', 'Times New Roman', 'Georgia', 'Courier New', 'Impact'];
+/** PT Sans лежит в репозитории (fonts/) — одинаково и в превью, и при сборке на любом сервере. */
+const FONTS = ['PT Sans', 'Arial', 'Verdana', 'Tahoma', 'Segoe UI', 'Calibri', 'Trebuchet MS', 'Times New Roman', 'Georgia', 'Courier New', 'Impact'];
 
 export function StylePanel({ style, update }: Props) {
   const set = <K extends keyof SubtitleStyle>(key: K, value: SubtitleStyle[K]) =>

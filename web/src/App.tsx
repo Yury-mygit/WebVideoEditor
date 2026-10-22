@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cueIssues, type Project } from '@wve/shared';
 import { api } from './api';
+import { AUTHORIZED_EVENT, useAuth } from './auth';
 import { useEditor } from './editor';
 import { CueTable } from './components/CueTable';
 import { Preview } from './components/Preview';
@@ -33,6 +34,7 @@ export function App() {
   const [showRender, setShowRender] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const importInput = useRef<HTMLInputElement>(null);
+  const auth = useAuth();
 
   const showError = useCallback((msg: string) => setToast(msg), []);
   useEffect(() => {
@@ -102,6 +104,13 @@ export function App() {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => flushSave().catch((e) => showError(`Не удалось сохранить: ${e.message}`)), AUTOSAVE_DELAY_MS);
   }, [project, flushSave, showError]);
+
+  // После повторного входа дописываем то, что не удалось сохранить.
+  useEffect(() => {
+    const onAuthorized = () => flushSave().catch((e) => showError(`Не удалось сохранить: ${e.message}`));
+    window.addEventListener(AUTHORIZED_EVENT, onAuthorized);
+    return () => window.removeEventListener(AUTHORIZED_EVENT, onAuthorized);
+  }, [flushSave, showError]);
 
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -220,6 +229,11 @@ export function App() {
           ? Инструкция
         </a>
         <span className={`save-state ${saveState}`}>{saveLabel}</span>
+        {auth.required && (
+          <button onClick={auth.logout} title="Выйти">
+            Выйти
+          </button>
+        )}
         <button className="primary" onClick={() => setShowRender(true)}>
           🎬 Собрать видео
         </button>

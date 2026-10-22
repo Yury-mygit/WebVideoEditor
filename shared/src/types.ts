@@ -20,13 +20,11 @@ export interface Scene {
   fit: FitMode;
   /** Цвет полей для режима contain, #rrggbb. */
   padColor: string;
-  /** Переход к следующей сцене; не задан — переход проекта по умолчанию. */
+  /** Переход к следующей сцене; не задан — резкая смена. */
   transition?: Transition;
 }
 
 export interface TransitionSettings {
-  /** Переход между сценами по умолчанию. */
-  between: Transition;
   /** Проявление из чёрного в начале ролика, мс (0 — нет). */
   fadeInMs: number;
   /** Затемнение в чёрный в конце ролика, мс (0 — нет). */

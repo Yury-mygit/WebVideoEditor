@@ -116,7 +116,6 @@ function summary(project: Project, base: string, projectId: string) {
       ...(t.scene.transition ? { transition: transitionView(t.scene.transition) } : {}),
     })),
     transitions: {
-      between: transitionView(project.transitions.between),
       fadeInSec: sec(project.transitions.fadeInMs),
       fadeOutSec: sec(project.transitions.fadeOutMs),
       fadeAudio: project.transitions.fadeAudio,
@@ -235,10 +234,10 @@ export function createMcpServer(base: string): McpServer {
     {
       title: 'Изменить проект',
       description:
-        'Меняет название, длительность, разрешение, частоту кадров, стиль субтитров, звуковую дорожку, переходы и/или список сцен. ' +
-        'scenes заменяет весь список (порядок, длительности, подгонка, переход к следующей сцене). ' +
-        'splitEvenly делит длительность поровну, fitLastScene подгоняет последнюю сцену. ' +
-        'Переходы не сдвигают тайминги: идут симметрично относительно границы сцен.',
+        'Меняет название, длительность, разрешение, частоту кадров, стиль субтитров, звуковую дорожку, ' +
+        'проявление и затемнение и/или список сцен. scenes заменяет весь список (порядок, длительности, подгонка, ' +
+        'переход после сцены). splitEvenly делит длительность поровну, fitLastScene подгоняет последнюю сцену. ' +
+        'Переход задаётся у каждой сцены отдельно и не сдвигает тайминги: идёт симметрично относительно границы сцен.',
       inputSchema: {
         projectId: z.string(),
         name: z.string().optional(),
@@ -276,11 +275,10 @@ export function createMcpServer(base: string): McpServer {
               durationSec: z.number().nonnegative().optional(),
               fit: FIT.optional(),
               padColor: z.string().optional(),
-              transition: TRANSITION.nullable().optional().describe('Переход к следующей сцене; null — как у проекта'),
+              transition: TRANSITION.nullable().optional().describe('Переход к следующей сцене; null — резкая смена'),
             }),
           )
           .optional(),
-        transition: TRANSITION.optional().describe('Переход между сценами по умолчанию'),
         fadeInSec: z.number().nonnegative().optional().describe('Проявление из чёрного в начале ролика, 0 — нет'),
         fadeOutSec: z.number().nonnegative().optional().describe('Затемнение в чёрный в конце ролика, 0 — нет'),
         fadeAudio: z.boolean().optional().describe('Звук нарастает и затихает вместе с проявлением и затемнением'),
@@ -307,7 +305,6 @@ export function createMcpServer(base: string): McpServer {
         style: { ...p.style, ...(a.style ?? {}) },
         transitions: { ...p.transitions },
       };
-      if (a.transition) next.transitions.between = { type: a.transition.type, durationMs: ms(a.transition.durationSec) };
       if (a.fadeInSec !== undefined) next.transitions.fadeInMs = ms(a.fadeInSec);
       if (a.fadeOutSec !== undefined) next.transitions.fadeOutMs = ms(a.fadeOutSec);
       if (a.fadeAudio !== undefined) next.transitions.fadeAudio = a.fadeAudio;
@@ -328,7 +325,7 @@ export function createMcpServer(base: string): McpServer {
             fit: (s.fit as FitMode | undefined) ?? prev.fit,
             padColor: s.padColor ?? prev.padColor,
           };
-          if (s.transition === null) delete scene.transition;
+          if (s.transition === null || s.transition?.type === 'cut') delete scene.transition;
           else if (s.transition) scene.transition = { type: s.transition.type, durationMs: ms(s.transition.durationSec) };
           return scene;
         });

@@ -20,15 +20,23 @@ export interface SegmentLayout {
   shortened: number[];
 }
 
-export function effectiveTransition(scene: Scene, project: Project): Transition {
-  return scene.transition ?? project.transitions.between;
+const CUT: Transition = { type: 'cut', durationMs: 0 };
+
+/** Переход после сцены; не задан — резкая смена. */
+export function sceneTransition(scene: Scene): Transition {
+  return scene.transition ?? CUT;
 }
 
 export function layoutSegments(project: Project): SegmentLayout {
-  const { fps } = project.output;
+  const { fps, durationMs } = project.output;
   const toFrames = (ms: number) => Math.max(0, msToFrame(ms, fps));
+  // Сцены за концом ролика обрезаются: затемнение всегда приходится на его настоящий конец.
   const items = sceneTimeline(project.scenes)
-    .map((t) => ({ scene: t.scene, index: t.index, len: msToFrame(t.endMs, fps) - msToFrame(t.startMs, fps) }))
+    .map((t) => ({
+      scene: t.scene,
+      index: t.index,
+      len: msToFrame(Math.min(t.endMs, durationMs), fps) - msToFrame(t.startMs, fps),
+    }))
     .filter((s) => s.len > 0);
   const n = items.length;
   if (!n) return { segments: [], shortened: [] };
@@ -40,7 +48,7 @@ export function layoutSegments(project: Project): SegmentLayout {
   inc[0] = toFrames(project.transitions.fadeInMs);
   out[n - 1] = toFrames(project.transitions.fadeOutMs);
   for (let i = 0; i < n - 1; i++) {
-    const t = effectiveTransition(items[i].scene, project);
+    const t = sceneTransition(items[i].scene);
     const d = t.type === 'cut' ? 0 : toFrames(t.durationMs);
     out[i] = Math.floor(d / 2);
     inc[i + 1] = d - out[i];
@@ -68,7 +76,7 @@ export function layoutSegments(project: Project): SegmentLayout {
     const next = items[i + 1].scene;
     const a = out[i];
     const b = inc[i + 1];
-    if (effectiveTransition(scene, project).type === 'crossfade') {
+    if (sceneTransition(scene).type === 'crossfade') {
       // Ни один кадр перехода не совпадает с соседними статичными — доли от 1/(d+1) до d/(d+1).
       mix(scene, next, a + b, 1 / (a + b + 1), 1 / (a + b + 1));
     } else {

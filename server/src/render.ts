@@ -43,7 +43,8 @@ renderEvents.setMaxListeners(100);
 
 const hexColor = (c: string) => '0x' + (/^#?([0-9a-f]{6})$/i.exec(c)?.[1] ?? '000000');
 
-function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: number, label: string): string {
+/** tail — дополнительные фильтры слоя (для верхнего слоя перехода — прозрачность). */
+function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: number, label: string, tail: string): string {
   const fit = {
     contain: `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=${hexColor(scene.padColor)}`,
     cover: `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`,
@@ -53,12 +54,12 @@ function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: 
   // это намного быстрее, чем декодировать картинку на каждом кадре.
   return (
     `[${input}:v]${fit},setsar=1,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,` +
-    `loop=loop=${frames - 1}:size=1:start=0,setpts=N/FRAME_RATE/TB[${label}]`
+    `loop=loop=${frames - 1}:size=1:start=0,setpts=N/FRAME_RATE/TB${tail}[${label}]`
   );
 }
 
-function blackFilter(frames: number, w: number, h: number, fps: number, label: string): string {
-  return `color=c=black:s=${w}x${h}:r=${fps},format=yuv420p,trim=end_frame=${frames},setpts=N/FRAME_RATE/TB[${label}]`;
+function blackFilter(frames: number, w: number, h: number, fps: number, label: string, tail: string): string {
+  return `color=c=black:s=${w}x${h}:r=${fps},format=yuv420p,trim=end_frame=${frames},setpts=N/FRAME_RATE/TB${tail}[${label}]`;
 }
 
 /**
@@ -107,18 +108,27 @@ export function buildFfmpegArgs(
   const chains: string[] = [];
   let inputs = 0;
   // Слой отрезка: картинка сцены (отдельный вход) или чёрный кадр.
-  const layer = (scene: Scene | null, frames: number, label: string) => {
-    if (!scene) return void chains.push(blackFilter(frames, w, h, fps, label));
+  const layer = (scene: Scene | null, frames: number, label: string, tail = '') => {
+    if (!scene) return void chains.push(blackFilter(frames, w, h, fps, label, tail));
     args.push('-framerate', String(fps), '-i', `assets/${scene.image}`);
-    chains.push(sceneFilter(scene, inputs++, frames, w, h, label));
+    chains.push(sceneFilter(scene, inputs++, frames, w, h, label, tail));
   };
   segments.forEach((s, i) => {
     if (s.kind === 'still') return layer(s.scene, s.frames, `v${i}`);
-    // Переход: только кадры перехода, доля второго слоя растёт от кадра к кадру (N — номер кадра).
+    // Переход: второй слой накладывается на первый с растущей непрозрачностью p0 + step·k.
+    // Это p = (k + c) / m с целыми c и m: прозрачность даёт fade по времени (точный даже для
+    // переходов в несколько минут), а первые c кадров, нужные только для отсчёта, отрезаются.
+    // overlay + fade быстрее покадровой формулы blend в десятки раз.
+    const m = Math.round(1 / s.step);
+    const c = Math.round(s.p0 / s.step);
     layer(s.from, s.frames, `a${i}`);
-    layer(s.to, s.frames, `b${i}`);
-    const p = `(${s.p0}+${s.step}*N)`;
-    chains.push(`[a${i}][b${i}]blend=all_expr='A*(1-${p})+B*${p}',setpts=N/FRAME_RATE/TB[v${i}]`);
+    layer(
+      s.to,
+      s.frames + c,
+      `b${i}`,
+      `,format=yuva420p,fade=t=in:st=0:d=${m / fps}:alpha=1,trim=start_frame=${c},setpts=N/FRAME_RATE/TB`,
+    );
+    chains.push(`[a${i}][b${i}]overlay=format=yuv420,setpts=N/FRAME_RATE/TB[v${i}]`);
   });
   if (!segments.length) throw new Error('Нет сцен для рендера');
   const labels = segments.map((_, i) => `[v${i}]`).join('');

@@ -115,7 +115,8 @@ test('переходы: без настроек — только резкая с
 
 test('переходы: проявление, плавный, через чёрный, затемнение — длительность не меняется', () => {
   const p = threeScenes();
-  p.transitions = { ...p.transitions, fadeInMs: 1000, fadeOutMs: 2000, between: { type: 'crossfade', durationMs: 1000 } };
+  p.transitions = { ...p.transitions, fadeInMs: 1000, fadeOutMs: 2000 };
+  p.scenes[0].transition = { type: 'crossfade', durationMs: 1000 };
   p.scenes[1].transition = { type: 'dip', durationMs: 2000 };
   const { segments, shortened } = layoutSegments(p);
   assert.deepEqual(describe(p), ['#>a:25', 'a:63', 'a>b:25', 'b:62', 'b>#:25', '#>c:25', 'c:25', 'c>#:50']);
@@ -138,16 +139,23 @@ test('переходы: слишком короткая сцена — пере�
   const p = threeScenes();
   p.scenes[1].durationMs = 400; // 10 кадров
   p.output.durationMs = 8400;
-  p.transitions.between = { type: 'crossfade', durationMs: 2000 };
+  for (const s of p.scenes) s.transition = { type: 'crossfade', durationMs: 2000 };
   const { segments, shortened } = layoutSegments(p);
   assert.deepEqual(shortened, [2]);
   assert.equal(segmentsFrames(segments), 210);
   assert.match(validateProject(p).map((i) => i.message).join('\n'), /короче своих переходов \(2\)/);
 });
 
+test('переходы: сцены длиннее ролика обрезаются, затемнение — в конце ролика', () => {
+  const p = threeScenes();
+  p.output.durationMs = 6000; // 150 кадров: сцена a целиком, b наполовину, c за концом
+  p.transitions.fadeOutMs = 1000;
+  assert.deepEqual(describe(p), ['a:100', 'b:25', 'b>#:25']);
+});
+
 test('переходы: тестовый фрагмент с середины перехода продолжает его с нужной доли', () => {
   const p = threeScenes();
-  p.transitions.between = { type: 'crossfade', durationMs: 1000 };
+  for (const s of p.scenes) s.transition = { type: 'crossfade', durationMs: 1000 };
   const all = layoutSegments(p).segments;
   const part = sliceSegments(all, 95, 150);
   assert.equal(segmentsFrames(part), 55);
@@ -161,9 +169,21 @@ test('переходы: тестовый фрагмент с середины п
 });
 
 test('переходы: старый проект без настроек открывается с резкой сменой', () => {
-  const p = normalizeProject({ meta: { name: 'old' }, scenes: [createScene('a', 1000)] } as Partial<Project>);
-  assert.equal(p.transitions.between.type, 'cut');
+  const p = normalizeProject({ meta: { name: 'old' }, scenes: [createScene('a', 1000), createScene('b', 1000)] } as Partial<Project>);
+  assert.deepEqual(p.scenes.map((s) => s.transition), [undefined, undefined]);
   assert.equal(p.transitions.fadeInMs, 0);
+});
+
+test('переходы: общий переход раннего формата переносится в сцены, кроме последней и уже заданных', () => {
+  const scenes = [createScene('a', 1000), createScene('b', 1000), createScene('c', 1000)];
+  scenes[1].transition = { type: 'dip', durationMs: 500 };
+  const legacy = { meta: { name: 'old' }, scenes, transitions: { between: { type: 'crossfade', durationMs: 2000 }, fadeInMs: 1000 } };
+  const p = normalizeProject(legacy as unknown as Partial<Project>);
+  assert.deepEqual(
+    p.scenes.map((s) => s.transition),
+    [{ type: 'crossfade', durationMs: 2000 }, { type: 'dip', durationMs: 500 }, undefined],
+  );
+  assert.deepEqual(p.transitions, { fadeInMs: 1000, fadeOutMs: 0, fadeAudio: true });
 });
 
 test('cueIssues: пересечения, короткие, за пределами', () => {

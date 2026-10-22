@@ -32,7 +32,9 @@ interface Props {
 const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp';
 const FIT_LABELS: Record<FitMode, string> = { cover: 'Обрезать', contain: 'Вписать', stretch: 'Растянуть' };
 const TRANSITION_LABELS: Record<TransitionType, string> = { cut: 'Резко', crossfade: 'Плавно', dip: 'Через чёрный' };
-const DURATIONS_MS = [500, 1000, 1500, 2000, 3000, 5000];
+const DURATIONS_MS = [0.5, 1, 1.5, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600].map((s) => s * 1000);
+const durationLabel = (ms: number) =>
+  ms >= 60_000 && ms % 60_000 === 0 ? `${ms / 60_000} мин` : `${String(ms / 1000).replace('.', ',')} с`;
 
 /** Длительность перехода из готового списка (значение, заданное через MCP, тоже показывается). */
 function DurationSelect(props: { valueMs: number; onChange: (ms: number) => void; allowZero?: boolean; title?: string }) {
@@ -44,7 +46,7 @@ function DurationSelect(props: { valueMs: number; onChange: (ms: number) => void
       {allowZero && <option value={0}>нет</option>}
       {options.map((ms) => (
         <option key={ms} value={ms}>
-          {String(ms / 1000).replace('.', ',')} с
+          {durationLabel(ms)}
         </option>
       ))}
     </select>
@@ -69,7 +71,7 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
   const setScene = (id: string, patch: Partial<Scene>, key?: string) =>
     update((p) => ({ ...p, scenes: p.scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) }), key);
 
-  // ФТ-16: переходы проекта по умолчанию, проявление и затемнение.
+  // ФТ-16: проявление и затемнение ролика; переходы между сценами задаются у каждой сцены.
   const { transitions } = project;
   const setTransitions = (patch: Partial<TransitionSettings>) =>
     update((p) => ({ ...p, transitions: { ...p.transitions, ...patch } }));
@@ -179,28 +181,6 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
       </label>
 
       <div className="transitions">
-        <div className="field">
-          <span>Переход между сценами</span>
-          <div className="row">
-            <select
-              value={transitions.between.type}
-              onChange={(e) => setTransitions({ between: { ...transitions.between, type: e.target.value as TransitionType } })}
-            >
-              {Object.entries(TRANSITION_LABELS).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-            {transitions.between.type !== 'cut' && (
-              <DurationSelect
-                title="Длительность перехода: половина до границы сцен, половина после"
-                valueMs={transitions.between.durationMs}
-                onChange={(ms) => setTransitions({ between: { ...transitions.between, durationMs: ms } })}
-              />
-            )}
-          </div>
-        </div>
         <div className="row">
           <label className="field">
             <span>Проявление в начале</span>
@@ -279,17 +259,19 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
                 )}
               </div>
               {i < scenes.length - 1 && (
-                <div className="row scene-transition" title="Переход к следующей сцене">
-                  <span className="muted">→</span>
+                <div
+                  className="row scene-transition"
+                  title="Переход к следующей сцене: половина до границы сцен, половина после"
+                >
+                  <span className="muted">Переход →</span>
                   <select
-                    value={scene.transition?.type ?? 'default'}
+                    value={scene.transition?.type ?? 'cut'}
                     onChange={(e) => {
-                      const v = e.target.value;
-                      const durationMs = scene.transition?.durationMs ?? transitions.between.durationMs;
-                      setScene(scene.id, { transition: v === 'default' ? undefined : { type: v as TransitionType, durationMs } });
+                      const type = e.target.value as TransitionType;
+                      const durationMs = scene.transition?.durationMs ?? 1000;
+                      setScene(scene.id, { transition: type === 'cut' ? undefined : { type, durationMs } });
                     }}
                   >
-                    <option value="default">По умолчанию</option>
                     {Object.entries(TRANSITION_LABELS).map(([v, l]) => (
                       <option key={v} value={v}>
                         {l}

@@ -8,6 +8,7 @@ import {
   type RenderRange,
   type Scene,
   type SubtitleStyle,
+  type Transition,
   type TransitionSettings,
 } from './types';
 
@@ -48,7 +49,6 @@ export const DEFAULT_OUTPUT: OutputSettings = {
 
 /** По умолчанию переходов нет — старые проекты собираются как раньше. */
 export const DEFAULT_TRANSITIONS: TransitionSettings = {
-  between: { type: 'cut', durationMs: 1000 },
   fadeInMs: 0,
   fadeOutMs: 0,
   fadeAudio: true,
@@ -59,7 +59,7 @@ export function createProject(name: string): Project {
     meta: { formatVersion: PROJECT_FORMAT_VERSION, name, updatedAt: new Date().toISOString() },
     output: { ...DEFAULT_OUTPUT },
     scenes: [],
-    transitions: { ...DEFAULT_TRANSITIONS, between: { ...DEFAULT_TRANSITIONS.between } },
+    transitions: { ...DEFAULT_TRANSITIONS },
     audio: null,
     style: { ...DEFAULT_STYLE },
     subtitles: [],
@@ -69,15 +69,16 @@ export function createProject(name: string): Project {
 /** Дополняет загруженный проект значениями по умолчанию (на случай старого формата). */
 export function normalizeProject(p: Partial<Project> & { meta?: Partial<Project['meta']> }): Project {
   const base = createProject(p.meta?.name ?? 'Без названия');
+  // Ранний формат хранил общий переход между сценами — переносим его в сцены, у которых своего нет.
+  const { between, ...transitions } = (p.transitions ?? {}) as Partial<TransitionSettings> & { between?: Transition };
+  const scenes = (p.scenes ?? []).map((s, i, all) =>
+    between && between.type !== 'cut' && !s.transition && i < all.length - 1 ? { ...s, transition: { ...between } } : s,
+  );
   return {
     meta: { ...base.meta, ...p.meta },
     output: { ...base.output, ...p.output },
-    scenes: p.scenes ?? [],
-    transitions: {
-      ...base.transitions,
-      ...p.transitions,
-      between: { ...base.transitions.between, ...p.transitions?.between },
-    },
+    scenes,
+    transitions: { ...base.transitions, ...transitions },
     audio: p.audio ?? null,
     style: { ...base.style, ...p.style },
     subtitles: p.subtitles ?? [],

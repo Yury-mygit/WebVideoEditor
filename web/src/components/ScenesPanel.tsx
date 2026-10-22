@@ -12,6 +12,7 @@ import {
   type Scene,
 } from '@wve/shared';
 import { api, assetUrl } from '../api';
+import { AUDIO_ACCEPT, assetLabel, isAudioFile } from '../audio';
 import type { UpdateProject } from '../editor';
 import { TimeInput } from './TimeInput';
 
@@ -22,14 +23,17 @@ interface Props {
   onSeek: (ms: number) => void;
   currentMs: number;
   onError: (msg: string) => void;
+  /** Длительность звуковой дорожки, когда она известна. */
+  audioDurationMs: number | null;
 }
 
 const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp';
 const FIT_LABELS: Record<FitMode, string> = { cover: 'Обрезать', contain: 'Вписать', stretch: 'Растянуть' };
 
-export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onError }: Props) {
+export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onError, audioDurationMs }: Props) {
   const addInput = useRef<HTMLInputElement>(null);
   const replaceInput = useRef<HTMLInputElement>(null);
+  const audioInput = useRef<HTMLInputElement>(null);
   const replaceTarget = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -44,8 +48,23 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
   const setScene = (id: string, patch: Partial<Scene>, key?: string) =>
     update((p) => ({ ...p, scenes: p.scenes.map((s) => (s.id === id ? { ...s, ...patch } : s)) }), key);
 
+  // Звуковая дорожка: идёт с начала ролика, всё, что длиннее ролика, при сборке отрезается.
+  async function setAudioFile(file: File) {
+    setBusy(true);
+    try {
+      const name = await api.uploadAsset(projectId, file);
+      update((p) => ({ ...p, audio: name }));
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // ФТ-10: добавление файлов выбором или перетаскиванием.
   async function addFiles(files: File[]) {
+    const audio = files.find((f) => isAudioFile(f.name));
+    if (audio) await setAudioFile(audio);
     const images = files.filter((f) => /\.(jpe?g|png|webp)$/i.test(f.name));
     if (!images.length) return;
     setBusy(true);
@@ -233,6 +252,55 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
         </div>
       )}
 
+      <div className="audio-track">
+        <div className="panel-title">
+          Звук
+          <button className="small" disabled={busy} onClick={() => audioInput.current?.click()}>
+            {project.audio ? 'Заменить' : '+ Звук'}
+          </button>
+        </div>
+        {project.audio ? (
+          <>
+            <div className="audio-name" title={project.audio}>
+              ♪ {assetLabel(project.audio)}
+            </div>
+            <div className="muted small-text">
+              {audioDurationMs !== null && <>Длина {formatHms(audioDurationMs)}. </>}
+              {audioDurationMs !== null && audioDurationMs > output.durationMs
+                ? `Звук длиннее ролика — после ${formatHms(output.durationMs)} будет отрезан.`
+                : 'Идёт с начала ролика.'}
+            </div>
+            <div className="row">
+              {/* ФТ-41: длительность ролика по звуку; сцены потом подгоняются кнопками выше. */}
+              {audioDurationMs !== null && audioDurationMs !== output.durationMs && (
+                <button
+                  className="small"
+                  onClick={() => update((p) => ({ ...p, output: { ...p.output, durationMs: audioDurationMs } }))}
+                >
+                  Ролик = длина звука
+                </button>
+              )}
+              <button className="small danger" onClick={() => update((p) => ({ ...p, audio: null }))}>
+                Убрать звук
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="muted small-text">Без звука. Подойдут M4A, MP3, WAV, AAC, OGG.</div>
+        )}
+      </div>
+
+      <input
+        ref={audioInput}
+        type="file"
+        accept={AUDIO_ACCEPT}
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void setAudioFile(f);
+          e.target.value = '';
+        }}
+      />
       <input
         ref={addInput}
         type="file"

@@ -20,6 +20,7 @@ import { config } from './config';
 import { authEnabled } from './auth';
 import { cancelRender, enqueueRender, getJob, listJobs } from './render';
 import {
+  AUDIO_EXTENSIONS,
   HttpError,
   IMAGE_EXTENSIONS,
   createNewProject,
@@ -79,8 +80,8 @@ function links(base: string, projectId: string) {
   return {
     upload: `curl${auth} -F "file=@<путь к файлу>" ${base}/api/projects/${projectId}/assets`,
     uploadNote:
-      'Ответ — {"name": "<имя на сервере>"}; это имя передавайте в add_scenes или import_subtitles. ' +
-      'Картинки: JPG, PNG, WEBP. Субтитры: SRT, ASS, TXT. Пароль — переменная окружения SLIDESUB_PASSWORD.',
+      'Ответ — {"name": "<имя на сервере>"}; это имя передавайте в add_scenes, import_subtitles или update_project (audio). ' +
+      'Картинки: JPG, PNG, WEBP. Субтитры: SRT, ASS, TXT. Звук: M4A, MP3, WAV, AAC, OGG. Пароль — переменная окружения SLIDESUB_PASSWORD.',
     download: `curl${auth} -o <файл.mp4> "${base}/api/projects/${projectId}/results/<имя файла>"`,
     editor: `${base}/#/p/${projectId}`,
   };
@@ -106,6 +107,7 @@ function summary(project: Project, base: string, projectId: string) {
       fit: t.scene.fit,
       padColor: t.scene.padColor,
     })),
+    audio: project.audio,
     subtitlesCount: project.subtitles.length,
     style: project.style,
     issues: validateProject(project),
@@ -219,7 +221,7 @@ export function createMcpServer(base: string): McpServer {
     {
       title: 'Изменить проект',
       description:
-        'Меняет название, длительность, разрешение, частоту кадров, стиль субтитров и/или список сцен. ' +
+        'Меняет название, длительность, разрешение, частоту кадров, стиль субтитров, звуковую дорожку и/или список сцен. ' +
         'scenes заменяет весь список (порядок, длительности, подгонка). splitEvenly делит длительность поровну, fitLastScene подгоняет последнюю сцену.',
       inputSchema: {
         projectId: z.string(),
@@ -263,15 +265,26 @@ export function createMcpServer(base: string): McpServer {
           .optional(),
         splitEvenly: z.boolean().optional(),
         fitLastScene: z.boolean().optional(),
+        audio: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Звуковая дорожка: имя загруженного аудиофайла (идёт с начала ролика, лишнее отрезается); null — убрать звук'),
       },
     },
     safe(async (a) => {
       const p = await loadProject(a.projectId);
+      if (a.audio) {
+        const files = new Set((await listAssets(a.projectId)).map((f) => f.name));
+        if (!files.has(a.audio)) throw new HttpError(404, `Нет такого файла в проекте: ${a.audio}`);
+        if (!AUDIO_EXTENSIONS.has(a.audio.slice(a.audio.lastIndexOf('.')).toLowerCase())) throw new HttpError(400, `Не аудиофайл: ${a.audio}`);
+      }
       let next: Project = { ...p, meta: { ...p.meta }, output: { ...p.output }, style: { ...p.style, ...(a.style ?? {}) } };
       if (a.name) next.meta.name = a.name;
       if (a.durationSec) next.output.durationMs = ms(a.durationSec);
       if (a.width && a.height) Object.assign(next.output, { width: a.width, height: a.height });
       if (a.fps) next.output.fps = a.fps;
+      if (a.audio !== undefined) next.audio = a.audio;
       if (a.scenes) {
         const old = new Map(p.scenes.map((s) => [s.image, s]));
         next.scenes = a.scenes.map((s): Scene => {

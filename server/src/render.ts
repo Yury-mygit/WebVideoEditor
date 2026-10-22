@@ -59,8 +59,17 @@ export function filterPath(p: string): string {
   return `'${p.replace(/\\/g, '/').replace(/'/g, '').replace(/:/g, '\\:')}'`;
 }
 
-/** Строит аргументы FFmpeg. Пути к материалам относительные: процесс запускается в папке проекта. */
-export function buildFfmpegArgs(project: Project, assRel: string, outRel: string, fontsDir: string | null): string[] {
+/**
+ * Строит аргументы FFmpeg. Пути к материалам относительные: процесс запускается в папке проекта.
+ * audioStartMs — с какого места звуковой дорожки начинать (для тестового фрагмента).
+ */
+export function buildFfmpegArgs(
+  project: Project,
+  assRel: string,
+  outRel: string,
+  fontsDir: string | null,
+  audioStartMs = 0,
+): string[] {
   const { width: w, height: h, fps } = project.output;
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
   const chains: string[] = [];
@@ -78,9 +87,16 @@ export function buildFfmpegArgs(project: Project, assRel: string, outRel: string
   const labels = Array.from({ length: inputs }, (_, i) => `[v${i}]`).join('');
   const ass = `ass=${filterPath(assRel)}${fontsDir ? `:fontsdir=${filterPath(fontsDir)}` : ''}`;
   chains.push(`${labels}concat=n=${inputs}:v=1:a=0,${ass}[out]`);
+  // Звук начинается вместе с роликом; всё, что длиннее ролика, отрезается (-t на входе).
+  const audio: string[] = [];
+  if (project.audio) {
+    args.push('-ss', String(audioStartMs / 1000), '-t', String(project.output.durationMs / 1000), '-i', `assets/${project.audio}`);
+    audio.push('-map', `${inputs}:a:0`, '-c:a', 'aac', '-b:a', '160k');
+  }
   args.push(
     '-filter_complex', chains.join(';'),
     '-map', '[out]',
+    ...audio,
     '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-crf', '20',
     '-pix_fmt', 'yuv420p', '-r', String(fps),
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
@@ -197,7 +213,7 @@ async function runJob(job: Job): Promise<void> {
 
   await fs.writeFile(path.join(cwd, job.assFile), buildAss(project.subtitles, project.style, project.output, project.meta.name), 'utf8');
   const fontsDir = existsSync(config.fontsDir) ? config.fontsDir : null;
-  const args = buildFfmpegArgs(project, job.assFile, job.partFile, fontsDir);
+  const args = buildFfmpegArgs(project, job.assFile, job.partFile, fontsDir, job.range?.startMs ?? 0);
   job.log.write(`[server] cwd: ${cwd}\n[server] ${config.ffmpegPath} ${args.map((a) => (/\s|;/.test(a) ? `"${a}"` : a)).join(' ')}\n\n`);
 
   const child = spawn(config.ffmpegPath, args, { cwd, windowsHide: true });

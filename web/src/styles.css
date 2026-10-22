@@ -347,6 +347,25 @@ legend {
 .scenes-summary.warn {
   color: var(--warn);
 }
+.audio-track {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.audio-track .panel-title {
+  align-self: stretch;
+  margin-bottom: 0;
+}
+.audio-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ---------- Превью ---------- */
 .preview {

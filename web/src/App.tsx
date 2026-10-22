@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cueIssues, type Project } from '@wve/shared';
-import { api } from './api';
+import { api, assetUrl } from './api';
+import { useAudioPreview } from './audio';
 import { AUTHORIZED_EVENT, useAuth } from './auth';
 import { useEditor } from './editor';
 import { CueTable } from './components/CueTable';
@@ -120,8 +121,10 @@ export function App() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
-  // ---------- Воспроизведение превью (ФТ-53, без аудио) ----------
+  // ---------- Воспроизведение превью (ФТ-53) ----------
   const durationMs = project?.output.durationMs ?? 0;
+  const audioSrc = projectId && project?.audio ? assetUrl(projectId, project.audio) : null;
+  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing);
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
@@ -258,6 +261,7 @@ export function App() {
           onSeek={seek}
           currentMs={timeMs}
           onError={showError}
+          audioDurationMs={audioDurationMs}
         />
         <Preview
           projectId={projectId}
@@ -271,7 +275,14 @@ export function App() {
       </main>
 
       <section className="bottom">
-        <Timeline project={project} timeMs={timeMs} onSeek={seek} selectedIds={selectedIds} issueIds={issueIds} />
+        <Timeline
+          project={project}
+          timeMs={timeMs}
+          onSeek={seek}
+          selectedIds={selectedIds}
+          issueIds={issueIds}
+          audioDurationMs={audioDurationMs}
+        />
         <CueTable
           project={project}
           update={update}

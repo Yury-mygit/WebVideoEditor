@@ -31,16 +31,8 @@ const ASSET_RE = /^[\w\-. ()а-яё]+$/i;
 
 export const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 export const SUBTITLE_EXTENSIONS = new Set(['.srt', '.ass', '.ssa', '.txt']);
-export const ASSET_EXTENSIONS = new Set([
-  ...IMAGE_EXTENSIONS,
-  ...SUBTITLE_EXTENSIONS,
-  '.mp3',
-  '.wav',
-  '.m4a',
-  '.ogg',
-  '.ttf',
-  '.otf',
-]);
+export const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg']);
+export const ASSET_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...SUBTITLE_EXTENSIONS, ...AUDIO_EXTENSIONS, '.ttf', '.otf']);
 const RESULT_RE = /^[\w\-. ()а-яё]+\.mp4$/i;
 
 export function projectDir(id: string): string {

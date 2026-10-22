@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatHms, sceneTimeline, type Project } from '@wve/shared';
+import { assetLabel } from '../audio';
 
 interface Props {
   project: Project;
@@ -7,6 +8,7 @@ interface Props {
   onSeek: (ms: number) => void;
   selectedIds: ReadonlySet<string>;
   issueIds: ReadonlySet<string>;
+  audioDurationMs: number | null;
 }
 
 const ZOOMS = [
@@ -18,8 +20,9 @@ const ZOOMS = [
 
 const SCENE_COLORS = ['#3b6ea8', '#5a8f4e', '#a8823b', '#8a4fa0', '#3b9a9a', '#a04f5e'];
 const ROW_SCENES = 22;
+const ROW_AUDIO = 16;
 const ROW_CUES = 30;
-const HEIGHT = 8 + ROW_SCENES + 6 + ROW_CUES + 18;
+const BASE_HEIGHT = 8 + ROW_SCENES + 6 + ROW_CUES + 18;
 
 /** Текст, обрезанный по ширине блока (а не сжатый, как при fillText с maxWidth). */
 function clippedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, h: number) {
@@ -31,13 +34,15 @@ function clippedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: 
   ctx.restore();
 }
 
-/** ФТ-51: полоса сцен и полоса реплик; клик перемещает позицию. */
-export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds }: Props) {
+/** ФТ-51: полоса сцен, звуковая дорожка (если есть) и полоса реплик; клик перемещает позицию. */
+export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audioDurationMs }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(ZOOMS[0].ms);
   const [width, setWidth] = useState(800);
   const total = Math.max(1, project.output.durationMs);
+  const audioRow = project.audio ? ROW_AUDIO + 4 : 0;
+  const height = BASE_HEIGHT + audioRow;
 
   // Видимое окно: весь ролик или окно вокруг текущей позиции.
   const span = zoom && zoom < total ? zoom : total;
@@ -57,9 +62,9 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds }: Pro
     if (!canvas || !ctx) return;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
-    canvas.height = HEIGHT * dpr;
+    canvas.height = height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, HEIGHT);
+    ctx.clearRect(0, 0, width, height);
     const x = (ms: number) => ((ms - viewStart) / span) * width;
     const viewEnd = viewStart + span;
 
@@ -76,7 +81,21 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds }: Pro
       if (x1 - x0 > 30) clippedText(ctx, `Сцена ${t.index + 1}`, x0 + 6, yScenes, x1 - x0 - 10, ROW_SCENES);
     }
 
-    const yCues = yScenes + ROW_SCENES + 6;
+    // Звук начинается с нуля; пока длина файла неизвестна, рисуем его на весь ролик.
+    if (project.audio) {
+      const yAudio = yScenes + ROW_SCENES + 4;
+      const end = Math.min(total, audioDurationMs ?? total);
+      const x0 = Math.max(0, x(0));
+      const x1 = Math.min(width, x(end));
+      if (x1 > x0) {
+        ctx.fillStyle = '#7a5fa8';
+        ctx.fillRect(x0, yAudio, x1 - x0, ROW_AUDIO);
+        ctx.fillStyle = '#fff';
+        clippedText(ctx, `♪ ${assetLabel(project.audio)}`, x0 + 6, yAudio, x1 - x0 - 10, ROW_AUDIO);
+      }
+    }
+
+    const yCues = yScenes + ROW_SCENES + 6 + audioRow;
     ctx.fillStyle = 'rgba(127,127,127,0.12)';
     ctx.fillRect(0, yCues, width, ROW_CUES);
     for (const c of project.subtitles) {
@@ -106,8 +125,8 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds }: Pro
     // Курсор
     const px = x(timeMs);
     ctx.fillStyle = '#ff4040';
-    ctx.fillRect(px - 1, 0, 2, HEIGHT);
-  }, [project.scenes, project.subtitles, timeMs, width, span, viewStart, selectedIds, issueIds]);
+    ctx.fillRect(px - 1, 0, 2, height);
+  }, [project.scenes, project.subtitles, project.audio, audioDurationMs, total, height, audioRow, timeMs, width, span, viewStart, selectedIds, issueIds]);
 
   const seekFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -127,7 +146,7 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds }: Pro
       <div ref={wrapRef} className="timeline-canvas-wrap">
         <canvas
           ref={canvasRef}
-          style={{ width, height: HEIGHT }}
+          style={{ width, height }}
           onMouseDown={seekFromEvent}
           onMouseMove={(e) => e.buttons === 1 && seekFromEvent(e)}
         />

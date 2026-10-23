@@ -50,6 +50,9 @@ const TRANSITION = z.object({
   durationSec: z.number().nonnegative().describe('Полная длительность: половина до границы сцен, половина после'),
 });
 const ms = (sec: number) => Math.round(sec * 1000);
+const CUT_FADE = z
+  .union([z.literal(0), z.literal(0.5), z.literal(1), z.literal(2), z.literal(5)])
+  .describe('Затухание картинки у границ выреза, с: гаснет за столько до начала и проявляется столько же после конца; 0 — резко');
 const sec = (msValue: number) => msValue / 1000;
 const transitionView = (t: Transition) => ({ type: t.type, durationSec: sec(t.durationMs) });
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] });
@@ -123,7 +126,12 @@ function summary(project: Project, base: string, projectId: string) {
       fadeAudio: project.transitions.fadeAudio,
     },
     audio: project.audio,
-    cuts: project.cuts.map((c, i) => ({ index: i + 1, start: formatSrtTime(c.startMs), end: formatSrtTime(c.endMs) })),
+    cuts: project.cuts.map((c, i) => ({
+      index: i + 1,
+      start: formatSrtTime(c.startMs),
+      end: formatSrtTime(c.endMs),
+      ...(c.fadeMs ? { fadeSec: sec(c.fadeMs) } : {}),
+    })),
     finalDuration: formatSrtTime(finalDurationMs(project.cuts, project.output.durationMs)),
     subtitlesCount: project.subtitles.length,
     style: project.style,
@@ -353,12 +361,42 @@ export function createMcpServer(base: string): McpServer {
         projectId: z.string(),
         startSec: z.number().nonnegative().describe('Начало куска на ленте, с'),
         endSec: z.number().positive().describe('Конец куска на ленте, с'),
+        fadeSec: CUT_FADE.optional(),
       },
     },
-    safe(async ({ projectId, startSec, endSec }) => {
+    safe(async ({ projectId, startSec, endSec, fadeSec }) => {
       if (endSec <= startSec) throw new HttpError(400, 'Конец куска должен быть позже начала');
       const p = await loadProject(projectId);
-      const cuts = normalizeCuts([...p.cuts, { startMs: ms(startSec), endMs: ms(endSec) }]);
+      const cuts = normalizeCuts([...p.cuts, { startMs: ms(startSec), endMs: ms(endSec), fadeMs: ms(fadeSec ?? 0) }]);
+      return summary(await saveProject(projectId, { ...p, cuts }), base, projectId);
+    }),
+  );
+
+  tool(
+    server,
+    'update_cut',
+    {
+      title: 'Изменить вырез',
+      description: 'Меняет границы или затухание выреза по номеру из get_project (cuts[].index); не заданные поля остаются как были.',
+      inputSchema: {
+        projectId: z.string(),
+        index: z.number().int().positive(),
+        startSec: z.number().nonnegative().optional(),
+        endSec: z.number().positive().optional(),
+        fadeSec: CUT_FADE.optional(),
+      },
+    },
+    safe(async ({ projectId, index, startSec, endSec, fadeSec }) => {
+      const p = await loadProject(projectId);
+      const old = p.cuts[index - 1];
+      if (!old) throw new HttpError(404, `Нет выреза с номером ${index}`);
+      const cut = {
+        startMs: startSec !== undefined ? ms(startSec) : old.startMs,
+        endMs: endSec !== undefined ? ms(endSec) : old.endMs,
+        fadeMs: fadeSec !== undefined ? ms(fadeSec) : old.fadeMs,
+      };
+      if (cut.endMs <= cut.startMs) throw new HttpError(400, 'Конец куска должен быть позже начала');
+      const cuts = normalizeCuts([...p.cuts.filter((_, i) => i !== index - 1), cut]);
       return summary(await saveProject(projectId, { ...p, cuts }), base, projectId);
     }),
   );

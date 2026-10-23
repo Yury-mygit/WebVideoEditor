@@ -86,6 +86,11 @@ export interface ProjectMeta {
 export interface Cut {
   startMs: number;
   endMs: number;
+  /**
+   * Затухание картинки у границ, мс (0 или нет — резко): за столько до начала выреза картинка
+   * гаснет в чёрный и столько же после конца проявляется. Сам вырез не меняется.
+   */
+  fadeMs?: number;
 }
 
 export interface Project {

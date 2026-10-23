@@ -6,6 +6,7 @@ import {
   createProject,
   createScene,
   cuesAfterCuts,
+  cutFadeLevel,
   finalDurationMs,
   fromFinalMs,
   keptPieces,
@@ -264,4 +265,19 @@ test('вырезы: реплики в видео, исходные не меня
   );
   assert.deepEqual(cuesAfterCuts(cues, [{ startMs: 20_000, endMs: 40_000 }]).map((c) => c.text), ['0', '40', '60', '80']);
   assert.equal(cues[1].startMs, 25_000);
+});
+
+test('вырезы: затухание у границ — снаружи выреза, склейка берёт большее', () => {
+  const cuts = normalizeCuts([
+    { startMs: 10_000, endMs: 20_000, fadeMs: 1000 },
+    { startMs: 18_000, endMs: 22_000, fadeMs: 2000 },
+  ]);
+  assert.deepEqual(cuts, [{ startMs: 10_000, endMs: 22_000, fadeMs: 2000 }]);
+  assert.equal(cutFadeLevel(cuts, 7000), 1);
+  assert.equal(cutFadeLevel(cuts, 8000), 1);
+  assert.equal(cutFadeLevel(cuts, 9000), 0.5);
+  assert.equal(cutFadeLevel(cuts, 22_000), 0);
+  assert.equal(cutFadeLevel(cuts, 23_000), 0.5);
+  assert.equal(cutFadeLevel(cuts, 24_000), 1);
+  assert.equal(cutFadeLevel([{ startMs: 10_000, endMs: 20_000 }], 9999), 1);
 });

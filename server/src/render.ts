@@ -28,8 +28,8 @@ import { projectDir } from './storage';
 interface Job extends RenderJobInfo {
   /** Проект в пределах собираемого видео: реплики и длительность уже без вырезов. */
   project: Project;
-  /** Отрезки с переходами: считаются по всей ленте и режутся по кускам между вырезами. */
-  segments: Segment[];
+  /** Куски видео между вырезами: отрезки с переходами (по всей ленте, нарезаны) и затухание у вырезов. */
+  videoPieces: VideoPiece[];
   /** Куски ленты (они же куски звуковой записи), которые идут в видео подряд. */
   pieces: Cut[];
   /** Фильтр громкости для проявления и затемнения — свой у каждого куска. */
@@ -41,6 +41,13 @@ interface Job extends RenderJobInfo {
   assFile: string;
   logFile: string;
   log: WriteStream | null;
+}
+
+/** Кусок видео между вырезами; fadeIn/fadeOut — кадры затухания картинки у соседних вырезов. */
+export interface VideoPiece {
+  segments: Segment[];
+  fadeInFrames: number;
+  fadeOutFrames: number;
 }
 
 const jobs = new Map<string, Job>();
@@ -109,7 +116,7 @@ export function filterPath(p: string): string {
  */
 export function buildFfmpegArgs(
   project: Project,
-  segments: readonly Segment[],
+  videoPieces: readonly VideoPiece[],
   assRel: string,
   outRel: string,
   { fontsDir, audioPieces, audioFilters }: RenderOptions,
@@ -124,6 +131,7 @@ export function buildFfmpegArgs(
     args.push('-framerate', String(fps), '-i', `assets/${scene.image}`);
     chains.push(sceneFilter(scene, inputs++, frames, w, h, label, tail));
   };
+  const segments = videoPieces.flatMap((p) => p.segments);
   segments.forEach((s, i) => {
     if (s.kind === 'still') return layer(s.scene, s.frames, `v${i}`);
     // Переход: второй слой накладывается на первый с растущей непрозрачностью p0 + step·k.
@@ -142,9 +150,21 @@ export function buildFfmpegArgs(
     chains.push(`[a${i}][b${i}]overlay=format=yuv420,setpts=N/FRAME_RATE/TB[v${i}]`);
   });
   if (!segments.length) throw new Error('Нет сцен для рендера');
-  const labels = segments.map((_, i) => `[v${i}]`).join('');
   const ass = `ass=${filterPath(assRel)}${fontsDir ? `:fontsdir=${filterPath(fontsDir)}` : ''}`;
-  chains.push(`${labels}concat=n=${segments.length}:v=1:a=0,${ass}[out]`);
+  // Каждый кусок склеивается из своих отрезков, гаснет и проявляется у вырезов (fade до чёрного,
+  // субтитры поверх уже после), затем куски склеиваются между собой.
+  let next = 0;
+  const pieceLabels = videoPieces.map((piece, k) => {
+    const labels = piece.segments.map(() => `[v${next++}]`).join('');
+    const frames = piece.segments.reduce((sum, seg) => sum + seg.frames, 0);
+    const fades = [
+      ...(piece.fadeInFrames ? [`fade=t=in:start_frame=0:nb_frames=${piece.fadeInFrames}`] : []),
+      ...(piece.fadeOutFrames ? [`fade=t=out:start_frame=${frames - piece.fadeOutFrames}:nb_frames=${piece.fadeOutFrames}`] : []),
+    ];
+    chains.push(`${labels}concat=n=${piece.segments.length}:v=1:a=0${fades.map((f) => `,${f}`).join('')}[p${k}]`);
+    return `[p${k}]`;
+  });
+  chains.push(`${pieceLabels.join('')}concat=n=${pieceLabels.length}:v=1:a=0,${ass}[out]`);
   // Звук начинается вместе с роликом; всё, что длиннее ролика, отрезается (-t на входе).
   // С вырезами каждый кусок записи — отдельный вход, куски склеиваются concat.
   const audio: string[] = [];
@@ -232,7 +252,17 @@ export async function enqueueRender(projectId: string, project: Project, range: 
   const lengthMs = range ? Math.min(range.durationMs, totalMs - fromFinal) : totalMs;
   const pieces = keptPieces(cuts, fromFinal, lengthMs);
   const allSegments = buildSegments(project);
-  const segments = pieces.flatMap((p) => sliceSegments(allSegments, msToFrame(p.startMs, fps), msToFrame(p.endMs, fps)));
+  // Затухание у выреза — только там, где кусок упирается в его границу.
+  const fadeFrames = (ms: number | undefined, frames: number) => Math.min(frames, msToFrame(ms ?? 0, fps));
+  const videoPieces = pieces.map((p): VideoPiece => {
+    const segments = sliceSegments(allSegments, msToFrame(p.startMs, fps), msToFrame(p.endMs, fps));
+    const frames = segments.reduce((sum, seg) => sum + seg.frames, 0);
+    return {
+      segments,
+      fadeInFrames: fadeFrames(cuts.find((c) => c.endMs === p.startMs)?.fadeMs, frames),
+      fadeOutFrames: fadeFrames(cuts.find((c) => c.startMs === p.endMs)?.fadeMs, frames),
+    };
+  }).filter((p) => p.segments.length);
   const finalProject: Project = {
     ...project,
     output: { ...project.output, durationMs: totalMs },
@@ -250,7 +280,7 @@ export async function enqueueRender(projectId: string, project: Project, range: 
     fileName,
     range,
     project: range ? sliceProject(finalProject, { startMs: fromFinal, durationMs: lengthMs }) : finalProject,
-    segments,
+    videoPieces,
     pieces,
     audioFilters: pieces.map((p) => audioFadeFilter(project, p.startMs)),
     startedAt: 0,
@@ -314,7 +344,7 @@ async function runJob(job: Job): Promise<void> {
 
   await fs.writeFile(path.join(cwd, job.assFile), buildAss(project.subtitles, project.style, project.output, project.meta.name), 'utf8');
   const fontsDir = existsSync(config.fontsDir) ? config.fontsDir : null;
-  const args = buildFfmpegArgs(project, job.segments, job.assFile, job.partFile, {
+  const args = buildFfmpegArgs(project, job.videoPieces, job.assFile, job.partFile, {
     fontsDir,
     audioPieces: job.pieces,
     audioFilters: job.audioFilters,

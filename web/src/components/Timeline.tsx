@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildSegments,
+  CUT_FADES_MS,
   cutAt,
   finalDurationMs,
   formatHms,
@@ -189,6 +190,19 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
       const x0 = x(c.startMs);
       const w = Math.max(2, x(c.endMs) - x0);
       hatch(ctx, x0, 0, w, yAxis);
+      // Затухание у границ — к чёрному снаружи выреза, на полосе сцен.
+      const d = c.fadeMs ?? 0;
+      if (d) {
+        for (const [a, b, darkAtStart] of [[c.startMs - d, c.startMs, false], [c.endMs, c.endMs + d, true]] as const) {
+          const gx0 = x(a);
+          const gx1 = x(b);
+          const g = ctx.createLinearGradient(gx0, 0, gx1, 0);
+          g.addColorStop(0, `rgba(0,0,0,${darkAtStart ? 0.85 : 0})`);
+          g.addColorStop(1, `rgba(0,0,0,${darkAtStart ? 0 : 0.85})`);
+          ctx.fillStyle = g;
+          ctx.fillRect(gx0, yScenes, Math.max(1, gx1 - gx0), ROW_SCENES);
+        }
+      }
       if (c.startMs === selectedCut) {
         ctx.strokeStyle = '#ffd24a';
         ctx.lineWidth = 2;
@@ -278,6 +292,17 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
               <TimeInput format="hms" valueMs={selected.startMs} onCommit={(ms) => changeSelected({ startMs: ms })} />
               <span className="small-text">до</span>
               <TimeInput format="hms" valueMs={selected.endMs} onCommit={(ms) => changeSelected({ endMs: ms })} />
+              <select
+                value={selected.fadeMs ?? 0}
+                onChange={(e) => changeSelected({ fadeMs: Number(e.target.value) || undefined })}
+                title="Картинка гаснет в чёрный перед вырезом и проявляется после — снаружи выреза, длина видео не меняется"
+              >
+                {CUT_FADES_MS.map((ms) => (
+                  <option key={ms} value={ms}>
+                    {ms ? `затухание ${String(ms / 1000).replace('.', ',')} с` : 'резко'}
+                  </option>
+                ))}
+              </select>
               <button className="small danger" onClick={removeSelected}>
                 Убрать вырез
               </button>

@@ -6,19 +6,45 @@ import type { Cue, Cut } from './types';
  * Время ленты — время звуковой записи; «итоговое» время — время в собранном видео.
  */
 
-/** Сортирует и склеивает пересекающиеся и соседние вырезы. */
+/** Длительности затухания у границ выреза, мс; 0 — резко. */
+export const CUT_FADES_MS = [0, 500, 1000, 2000, 5000];
+
+/** Сортирует и склеивает пересекающиеся и соседние вырезы; у склеенного — большее затухание. */
 export function normalizeCuts(cuts: readonly Cut[]): Cut[] {
   const sorted = cuts
-    .map((c) => ({ startMs: Math.max(0, Math.round(c.startMs)), endMs: Math.round(c.endMs) }))
+    .map((c): Cut => ({
+      startMs: Math.max(0, Math.round(c.startMs)),
+      endMs: Math.round(c.endMs),
+      ...(c.fadeMs ? { fadeMs: Math.round(c.fadeMs) } : {}),
+    }))
     .filter((c) => c.endMs > c.startMs)
     .sort((a, b) => a.startMs - b.startMs);
   const result: Cut[] = [];
   for (const c of sorted) {
     const last = result[result.length - 1];
-    if (last && c.startMs <= last.endMs) last.endMs = Math.max(last.endMs, c.endMs);
-    else result.push(c);
+    if (last && c.startMs <= last.endMs) {
+      last.endMs = Math.max(last.endMs, c.endMs);
+      const fade = Math.max(last.fadeMs ?? 0, c.fadeMs ?? 0);
+      if (fade) last.fadeMs = fade;
+    } else result.push(c);
   }
   return result;
+}
+
+/**
+ * Яркость картинки (0..1) в момент ленты из-за затухания у вырезов:
+ * перед вырезом гаснет до чёрного, после — проявляется. Субтитров это не касается.
+ */
+export function cutFadeLevel(cuts: readonly Cut[], ms: number): number {
+  let level = 1;
+  for (const c of cuts) {
+    const d = c.fadeMs ?? 0;
+    if (!d) continue;
+    if (ms >= c.startMs - d && ms < c.startMs) level = Math.min(level, (c.startMs - ms) / d);
+    else if (ms >= c.endMs && ms < c.endMs + d) level = Math.min(level, (ms - c.endMs) / d);
+    else if (ms >= c.startMs && ms < c.endMs) level = 0;
+  }
+  return level;
 }
 
 /** Сколько вырезано из первых limitMs ленты. */

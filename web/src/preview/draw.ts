@@ -1,5 +1,6 @@
 import {
   cueAt,
+  cutFadeLevel,
   frameAt,
   horizontalMargin,
   type Project,
@@ -168,6 +169,12 @@ export function drawFrame(
       drawLayer(ctx, look.to, images, w, h);
       ctx.globalAlpha = 1;
     }
+  }
+  // Затухание картинки у вырезов — под субтитрами, как при сборке.
+  const level = cutFadeLevel(project.cuts, timeMs);
+  if (level < 1) {
+    ctx.fillStyle = `rgba(0,0,0,${1 - level})`;
+    ctx.fillRect(0, 0, w, h);
   }
   const texts = cueAt(project.subtitles, timeMs).map((c) => c.text);
   drawSubtitles(ctx, texts, project.style, w, h);

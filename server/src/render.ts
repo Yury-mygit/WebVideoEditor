@@ -34,6 +34,8 @@ interface Job extends RenderJobInfo {
   pieces: Cut[];
   /** Фильтр громкости для проявления и затемнения — свой у каждого куска. */
   audioFilters: (string | null)[];
+  /** Затухание звука на краях кусков у вырезов, мс (как у картинки). */
+  audioEdgeFades: EdgeFade[];
   startedAt: number;
   child: ChildProcess | null;
   partFile: string;
@@ -48,6 +50,12 @@ export interface VideoPiece {
   segments: Segment[];
   fadeInFrames: number;
   fadeOutFrames: number;
+}
+
+/** Затухание на краях куска: нарастание в начале и затихание в конце, мс. */
+export interface EdgeFade {
+  inMs: number;
+  outMs: number;
 }
 
 const jobs = new Map<string, Job>();
@@ -100,6 +108,8 @@ export interface RenderOptions {
   audioPieces: readonly Cut[];
   /** Фильтры громкости кусков для проявления и затемнения. */
   audioFilters: readonly (string | null)[];
+  /** Затухание звука у вырезов на краях кусков; на остальных склейках — короткое, против щелчков. */
+  audioEdgeFades: readonly EdgeFade[];
 }
 
 /**
@@ -119,7 +129,7 @@ export function buildFfmpegArgs(
   videoPieces: readonly VideoPiece[],
   assRel: string,
   outRel: string,
-  { fontsDir, audioPieces, audioFilters }: RenderOptions,
+  { fontsDir, audioPieces, audioFilters, audioEdgeFades }: RenderOptions,
 ): string[] {
   const { width: w, height: h, fps } = project.output;
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
@@ -177,10 +187,13 @@ export function buildFfmpegArgs(
     // На склейках — короткое затухание и нарастание, чтобы не было щелчков.
     const labels = audioPieces.map((piece, k) => {
       const len = (piece.endMs - piece.startMs) / 1000;
+      const edge = audioEdgeFades[k] ?? { inMs: 0, outMs: 0 };
+      const fadeIn = Math.min(len, Math.max(k > 0 ? SPLICE_FADE_SEC : 0, edge.inMs / 1000));
+      const fadeOut = Math.min(len, Math.max(k < audioPieces.length - 1 ? SPLICE_FADE_SEC : 0, edge.outMs / 1000));
       const filters = [
         ...(audioFilters[k] ? [audioFilters[k]] : []),
-        ...(k > 0 ? [`afade=t=in:d=${SPLICE_FADE_SEC}`] : []),
-        ...(k < audioPieces.length - 1 ? [`afade=t=out:st=${Math.max(0, len - SPLICE_FADE_SEC)}:d=${SPLICE_FADE_SEC}`] : []),
+        ...(fadeIn ? [`afade=t=in:d=${fadeIn}`] : []),
+        ...(fadeOut ? [`afade=t=out:st=${Math.max(0, len - fadeOut)}:d=${fadeOut}`] : []),
       ];
       if (!filters.length) return `${first + k}:a:0`;
       chains.push(`[${first + k}:a]${filters.join(',')}[ap${k}]`);
@@ -252,15 +265,19 @@ export async function enqueueRender(projectId: string, project: Project, range: 
   const lengthMs = range ? Math.min(range.durationMs, totalMs - fromFinal) : totalMs;
   const pieces = keptPieces(cuts, fromFinal, lengthMs);
   const allSegments = buildSegments(project);
-  // Затухание у выреза — только там, где кусок упирается в его границу.
+  // Затухание у выреза (картинка и звук) — только там, где кусок упирается в его границу.
   const fadeFrames = (ms: number | undefined, frames: number) => Math.min(frames, msToFrame(ms ?? 0, fps));
-  const videoPieces = pieces.map((p): VideoPiece => {
+  const edgeFades = pieces.map((p): EdgeFade => ({
+    inMs: cuts.find((c) => c.endMs === p.startMs)?.fadeMs ?? 0,
+    outMs: cuts.find((c) => c.startMs === p.endMs)?.fadeMs ?? 0,
+  }));
+  const videoPieces = pieces.map((p, k): VideoPiece => {
     const segments = sliceSegments(allSegments, msToFrame(p.startMs, fps), msToFrame(p.endMs, fps));
     const frames = segments.reduce((sum, seg) => sum + seg.frames, 0);
     return {
       segments,
-      fadeInFrames: fadeFrames(cuts.find((c) => c.endMs === p.startMs)?.fadeMs, frames),
-      fadeOutFrames: fadeFrames(cuts.find((c) => c.startMs === p.endMs)?.fadeMs, frames),
+      fadeInFrames: fadeFrames(edgeFades[k].inMs, frames),
+      fadeOutFrames: fadeFrames(edgeFades[k].outMs, frames),
     };
   }).filter((p) => p.segments.length);
   const finalProject: Project = {
@@ -283,6 +300,7 @@ export async function enqueueRender(projectId: string, project: Project, range: 
     videoPieces,
     pieces,
     audioFilters: pieces.map((p) => audioFadeFilter(project, p.startMs)),
+    audioEdgeFades: edgeFades,
     startedAt: 0,
     child: null,
     assFile: path.join('renders', `${id}.ass`),
@@ -348,6 +366,7 @@ async function runJob(job: Job): Promise<void> {
     fontsDir,
     audioPieces: job.pieces,
     audioFilters: job.audioFilters,
+    audioEdgeFades: job.audioEdgeFades,
   });
   job.log.write(`[server] cwd: ${cwd}\n[server] ${config.ffmpegPath} ${args.map((a) => (/\s|;/.test(a) ? `"${a}"` : a)).join(' ')}\n\n`);
 

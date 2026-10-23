@@ -125,8 +125,8 @@ export function App() {
   // ---------- Воспроизведение превью (ФТ-53) ----------
   const durationMs = project?.output.durationMs ?? 0;
   const audioSrc = projectId && project?.audio ? assetUrl(projectId, project.audio) : null;
-  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing);
   const cuts = project?.cuts ?? NO_CUTS;
+  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing, cuts);
   useEffect(() => {
     if (!playing) return;
     let raf = 0;

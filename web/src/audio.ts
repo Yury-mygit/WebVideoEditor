@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { cutFadeLevel, type Cut } from '@wve/shared';
 
 export const AUDIO_ACCEPT = '.m4a,.mp3,.wav,.aac,.ogg';
 export const isAudioFile = (name: string) => /\.(m4a|mp3|wav|aac|ogg)$/i.test(name);
@@ -11,9 +12,10 @@ const MAX_DRIFT_MS = 400;
 
 /**
  * Звуковая дорожка в превью: играет вместе с курсором, перематывается при переходах по таймлайну
- * (и когда курсор перескакивает вырез). Возвращает длительность файла (после загрузки метаданных).
+ * (и когда курсор перескакивает вырез), затихает и нарастает у вырезов вместе с картинкой.
+ * Возвращает длительность файла (после загрузки метаданных).
  */
-export function useAudioPreview(src: string | null, timeMs: number, playing: boolean): number | null {
+export function useAudioPreview(src: string | null, timeMs: number, playing: boolean, cuts: readonly Cut[]): number | null {
   const ref = useRef<HTMLAudioElement | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
 
@@ -38,13 +40,14 @@ export function useAudioPreview(src: string | null, timeMs: number, playing: boo
     const audio = ref.current;
     if (!audio) return;
     const target = timeMs / 1000;
+    audio.volume = cutFadeLevel(cuts, timeMs);
     if (!playing || (Number.isFinite(audio.duration) && target >= audio.duration)) {
       audio.pause();
       return;
     }
     if (Math.abs(audio.currentTime - target) * 1000 > MAX_DRIFT_MS) audio.currentTime = target;
     if (audio.paused) audio.play().catch(() => {});
-  }, [src, timeMs, playing]);
+  }, [src, timeMs, playing, cuts]);
 
   return durationMs;
 }

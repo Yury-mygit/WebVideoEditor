@@ -52,7 +52,7 @@ const TRANSITION = z.object({
 const ms = (sec: number) => Math.round(sec * 1000);
 const CUT_FADE = z
   .union([z.literal(0), z.literal(0.5), z.literal(1), z.literal(2), z.literal(5)])
-  .describe('Затухание картинки у границ выреза, с: гаснет за столько до начала и проявляется столько же после конца; 0 — резко');
+  .describe('Затухание картинки и звука у границ выреза, с: гаснут за столько до начала и проявляются столько же после конца; 0 — резко');
 const sec = (msValue: number) => msValue / 1000;
 const transitionView = (t: Transition) => ({ type: t.type, durationSec: sec(t.durationMs) });
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] });

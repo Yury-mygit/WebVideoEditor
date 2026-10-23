@@ -295,7 +295,7 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
               <select
                 value={selected.fadeMs ?? 0}
                 onChange={(e) => changeSelected({ fadeMs: Number(e.target.value) || undefined })}
-                title="Картинка гаснет в чёрный перед вырезом и проявляется после — снаружи выреза, длина видео не меняется"
+                title="Картинка и звук гаснут перед вырезом и проявляются после — снаружи выреза, длина видео не меняется"
               >
                 {CUT_FADES_MS.map((ms) => (
                   <option key={ms} value={ms}>

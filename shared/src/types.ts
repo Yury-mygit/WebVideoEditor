@@ -82,8 +82,8 @@ export interface ProjectMeta {
   updatedAt: string;
 }
 
-/** Кусок, вырезанный из ролика; время — по самой звуковой записи, а не по ролику. */
-export interface AudioCut {
+/** Вырез на ленте: при сборке этот кусок пропускается целиком (картинка, звук, субтитры). */
+export interface Cut {
   startMs: number;
   endMs: number;
 }
@@ -95,8 +95,8 @@ export interface Project {
   transitions: TransitionSettings;
   /** Имя аудиофайла в assets; звук идёт с начала ролика. */
   audio: string | null;
-  /** Вырезанные куски звука, по возрастанию и без пересечений; сцены и реплики уже сдвинуты. */
-  audioCuts: AudioCut[];
+  /** Вырезы по возрастанию и без пересечений; сцены, звук и реплики под ними не меняются. */
+  cuts: Cut[];
   style: SubtitleStyle;
   subtitles: Cue[];
 }

@@ -1,3 +1,4 @@
+import { normalizeCuts } from './cuts';
 import { newId } from './id';
 import { msToFrame } from './time';
 import {
@@ -61,7 +62,7 @@ export function createProject(name: string): Project {
     scenes: [],
     transitions: { ...DEFAULT_TRANSITIONS },
     audio: null,
-    audioCuts: [],
+    cuts: [],
     style: { ...DEFAULT_STYLE },
     subtitles: [],
   };
@@ -81,7 +82,7 @@ export function normalizeProject(p: Partial<Project> & { meta?: Partial<Project[
     scenes,
     transitions: { ...base.transitions, ...transitions },
     audio: p.audio ?? null,
-    audioCuts: p.audioCuts ?? [],
+    cuts: normalizeCuts(p.cuts ?? []),
     style: { ...base.style, ...p.style },
     subtitles: p.subtitles ?? [],
   };

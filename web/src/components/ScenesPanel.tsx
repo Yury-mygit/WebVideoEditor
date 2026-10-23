@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
 import {
   createScene,
-  cutProject,
-  cutTotalMs,
+  finalDurationMs,
   fitLastScene,
   formatHms,
   msToFrame,
@@ -63,8 +62,6 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
   const [busy, setBusy] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropOver, setDropOver] = useState(false);
-  const [cutFrom, setCutFrom] = useState(0);
-  const [cutTo, setCutTo] = useState(0);
 
   const { scenes, output } = project;
   const total = totalScenesMs(scenes);
@@ -183,6 +180,9 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
           onCommit={(ms) => update((p) => ({ ...p, output: { ...p.output, durationMs: ms } }))}
         />
       </label>
+      {project.cuts.length > 0 && (
+        <div className="muted small-text">Видео без вырезов: {formatHms(finalDurationMs(project.cuts, output.durationMs))}</div>
+      )}
 
       <div className="transitions">
         <div className="row">
@@ -370,32 +370,6 @@ export function ScenesPanel({ projectId, project, update, onSeek, currentMs, onE
           </>
         ) : (
           <div className="muted small-text">Без звука. Подойдут M4A, MP3, WAV, AAC, OGG.</div>
-        )}
-        {(project.audio || project.audioCuts.length > 0) && (
-          <div className="audio-cuts">
-            <div className="muted small-text">
-              Вырезать кусок: он пропадёт из звука, субтитров и сцен, ролик станет короче. Время — по записи звука. Субтитры импортируйте до вырезов.
-            </div>
-            <div className="row">
-              с <TimeInput format="hms" valueMs={cutFrom} onCommit={setCutFrom} />
-              до <TimeInput format="hms" valueMs={cutTo} onCommit={setCutTo} />
-              <button
-                className="small"
-                onClick={() => {
-                  if (cutTo <= cutFrom) return onError('Конец куска должен быть позже начала');
-                  update((p) => cutProject(p, cutFrom, cutTo));
-                }}
-              >
-                Вырезать
-              </button>
-            </div>
-            {project.audioCuts.length > 0 && (
-              <div className="muted small-text">
-                Вырезано {formatHms(cutTotalMs(project.audioCuts))}:{' '}
-                {project.audioCuts.map((c) => `${formatHms(c.startMs)}–${formatHms(c.endMs)}`).join(', ')}. Отменить — Ctrl+Z.
-              </div>
-            )}
-          </div>
         )}
       </div>
 

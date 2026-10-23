@@ -6,7 +6,8 @@ import {
   createScene,
   cueIssues,
   CUE_ISSUE_LABELS,
-  cutProject,
+  finalDurationMs,
+  normalizeCuts,
   fitLastScene,
   formatSrtTime,
   sceneTimeline,
@@ -122,7 +123,8 @@ function summary(project: Project, base: string, projectId: string) {
       fadeAudio: project.transitions.fadeAudio,
     },
     audio: project.audio,
-    audioCuts: project.audioCuts.map((c) => ({ start: formatSrtTime(c.startMs), end: formatSrtTime(c.endMs) })),
+    cuts: project.cuts.map((c, i) => ({ index: i + 1, start: formatSrtTime(c.startMs), end: formatSrtTime(c.endMs) })),
+    finalDuration: formatSrtTime(finalDurationMs(project.cuts, project.output.durationMs)),
     subtitlesCount: project.subtitles.length,
     style: project.style,
     issues: validateProject(project),
@@ -344,19 +346,35 @@ export function createMcpServer(base: string): McpServer {
     {
       title: 'Вырезать кусок',
       description:
-        'Вырезает кусок ролика целиком: он пропадает из звука, субтитров и сцен, ролик становится короче. ' +
-        'Время — по звуковой записи (как в исходном видео), вырезы можно делать в любом порядке; уже вырезанное повторно не считается. ' +
-        'Реплики, импортированные после выреза, не сдвигаются — импортируйте субтитры до вырезов.',
+        'Ставит вырез на ленте: при сборке этот кусок пропускается целиком (картинка, звук, субтитры), видео становится короче. ' +
+        'Сцены, звук и реплики не меняются — время везде остаётся временем ленты (записи звука), вырез можно убрать (remove_cut). ' +
+        'Пересекающиеся вырезы склеиваются. В ответе cuts и finalDuration — длина собранного видео.',
       inputSchema: {
         projectId: z.string(),
-        startSec: z.number().nonnegative().describe('Начало куска по записи, с'),
-        endSec: z.number().positive().describe('Конец куска по записи, с'),
+        startSec: z.number().nonnegative().describe('Начало куска на ленте, с'),
+        endSec: z.number().positive().describe('Конец куска на ленте, с'),
       },
     },
     safe(async ({ projectId, startSec, endSec }) => {
       if (endSec <= startSec) throw new HttpError(400, 'Конец куска должен быть позже начала');
       const p = await loadProject(projectId);
-      return summary(await saveProject(projectId, cutProject(p, ms(startSec), ms(endSec))), base, projectId);
+      const cuts = normalizeCuts([...p.cuts, { startMs: ms(startSec), endMs: ms(endSec) }]);
+      return summary(await saveProject(projectId, { ...p, cuts }), base, projectId);
+    }),
+  );
+
+  tool(
+    server,
+    'remove_cut',
+    {
+      title: 'Убрать вырез',
+      description: 'Убирает вырез по номеру из get_project (cuts[].index): кусок снова попадёт в видео.',
+      inputSchema: { projectId: z.string(), index: z.number().int().positive() },
+    },
+    safe(async ({ projectId, index }) => {
+      const p = await loadProject(projectId);
+      if (index > p.cuts.length) throw new HttpError(404, `Нет выреза с номером ${index}`);
+      return summary(await saveProject(projectId, { ...p, cuts: p.cuts.filter((_, i) => i !== index - 1) }), base, projectId);
     }),
   );
 
@@ -481,7 +499,7 @@ export function createMcpServer(base: string): McpServer {
     {
       title: 'Собрать видео',
       description:
-        'Ставит сборку MP4 в очередь. testStartSec/testDurationSec — тестовый фрагмент вместо всего ролика. ' +
+        'Ставит сборку MP4 в очередь. testStartSec/testDurationSec — тестовый фрагмент вместо всего ролика: начало — место на ленте, длина — в собранном видео (вырезы пропускаются). ' +
         'Дальше — render_status; когда status = done, файл скачивается по ссылке downloadUrl.',
       inputSchema: {
         projectId: z.string(),

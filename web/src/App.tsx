@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cueIssues, type AudioCut, type Project } from '@wve/shared';
+import { cueIssues, cutAt, type Cut, type Project } from '@wve/shared';
 import { api, assetUrl } from './api';
 import { useAudioPreview } from './audio';
 import { AUTHORIZED_EVENT, useAuth } from './auth';
@@ -14,7 +14,7 @@ import { Timeline } from './components/Timeline';
 import { exportAss, exportSrt, importSubtitles } from './subtitleFiles';
 
 const AUTOSAVE_DELAY_MS = 1500;
-const NO_CUTS: AudioCut[] = [];
+const NO_CUTS: Cut[] = [];
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
 const idFromHash = () => /^#\/p\/([0-9a-f-]{36})$/i.exec(location.hash)?.[1] ?? null;
@@ -125,7 +125,8 @@ export function App() {
   // ---------- Воспроизведение превью (ФТ-53) ----------
   const durationMs = project?.output.durationMs ?? 0;
   const audioSrc = projectId && project?.audio ? assetUrl(projectId, project.audio) : null;
-  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing, project?.audioCuts ?? NO_CUTS);
+  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing);
+  const cuts = project?.cuts ?? NO_CUTS;
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
@@ -134,7 +135,9 @@ export function App() {
       const dt = now - last;
       last = now;
       setTimeMs((t) => {
-        const next = t + dt;
+        // Вырез — «портал»: дойдя до него, курсор перескакивает на его конец.
+        let next = t + dt;
+        for (let cut = cutAt(cuts, next); cut; cut = cutAt(cuts, next)) next = cut.endMs;
         if (next >= durationMs) {
           setPlaying(false);
           return durationMs;
@@ -145,7 +148,7 @@ export function App() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, durationMs]);
+  }, [playing, durationMs, cuts]);
 
   const seek = useCallback((ms: number) => setTimeMs(Math.max(0, ms)), []);
   const togglePlay = useCallback(() => setPlaying((p) => !p), []);
@@ -283,6 +286,7 @@ export function App() {
           selectedIds={selectedIds}
           issueIds={issueIds}
           audioDurationMs={audioDurationMs}
+          update={update}
         />
         <CueTable
           project={project}

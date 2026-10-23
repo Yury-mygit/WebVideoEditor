@@ -371,18 +371,6 @@ legend {
   align-self: stretch;
   margin-bottom: 0;
 }
-.audio-cuts {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-}
-.audio-cuts .row {
-  flex-wrap: wrap;
-}
-.audio-cuts .time-input {
-  width: 76px;
-}
 .audio-name {
   max-width: 100%;
   overflow: hidden;
@@ -437,6 +425,16 @@ legend {
   display: flex;
   gap: 4px;
   margin-bottom: 2px;
+}
+.timeline-cuts {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.timeline-cuts .time-input {
+  width: 76px;
 }
 .timeline-canvas-wrap {
   width: 100%;

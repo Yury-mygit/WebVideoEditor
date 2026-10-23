@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatHms, RESOLUTIONS, type Project, type ProjectIssue, type RenderJobInfo } from '@wve/shared';
+import { finalDurationMs, formatHms, RESOLUTIONS, type Project, type ProjectIssue, type RenderJobInfo } from '@wve/shared';
 import { api, renderFileUrl, watchRender } from '../api';
 import type { UpdateProject } from '../editor';
 
@@ -116,7 +116,10 @@ export function RenderDialog({ projectId, project, update, timeMs, flushSave, on
           </div>
           <div className="field">
             <span>Длительность</span>
-            <div className="mono">{formatHms(output.durationMs)}</div>
+            <div className="mono">
+              {formatHms(finalDurationMs(project.cuts, output.durationMs))}
+              {project.cuts.length > 0 && <span className="muted"> без вырезов</span>}
+            </div>
           </div>
         </div>
 

@@ -82,6 +82,12 @@ export interface ProjectMeta {
   updatedAt: string;
 }
 
+/** Кусок, вырезанный из ролика; время — по самой звуковой записи, а не по ролику. */
+export interface AudioCut {
+  startMs: number;
+  endMs: number;
+}
+
 export interface Project {
   meta: ProjectMeta;
   output: OutputSettings;
@@ -89,6 +95,8 @@ export interface Project {
   transitions: TransitionSettings;
   /** Имя аудиофайла в assets; звук идёт с начала ролика. */
   audio: string | null;
+  /** Вырезанные куски звука, по возрастанию и без пересечений; сцены и реплики уже сдвинуты. */
+  audioCuts: AudioCut[];
   style: SubtitleStyle;
   subtitles: Cue[];
 }

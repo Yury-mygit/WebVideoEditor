@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cueIssues, type Project } from '@wve/shared';
+import { cueIssues, type AudioCut, type Project } from '@wve/shared';
 import { api, assetUrl } from './api';
 import { useAudioPreview } from './audio';
 import { AUTHORIZED_EVENT, useAuth } from './auth';
@@ -14,6 +14,7 @@ import { Timeline } from './components/Timeline';
 import { exportAss, exportSrt, importSubtitles } from './subtitleFiles';
 
 const AUTOSAVE_DELAY_MS = 1500;
+const NO_CUTS: AudioCut[] = [];
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
 const idFromHash = () => /^#\/p\/([0-9a-f-]{36})$/i.exec(location.hash)?.[1] ?? null;
@@ -124,7 +125,7 @@ export function App() {
   // ---------- Воспроизведение превью (ФТ-53) ----------
   const durationMs = project?.output.durationMs ?? 0;
   const audioSrc = projectId && project?.audio ? assetUrl(projectId, project.audio) : null;
-  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing);
+  const audioDurationMs = useAudioPreview(audioSrc, timeMs, playing, project?.audioCuts ?? NO_CUTS);
   useEffect(() => {
     if (!playing) return;
     let raf = 0;

@@ -6,6 +6,7 @@ import {
   createScene,
   cueIssues,
   CUE_ISSUE_LABELS,
+  cutProject,
   fitLastScene,
   formatSrtTime,
   sceneTimeline,
@@ -121,6 +122,7 @@ function summary(project: Project, base: string, projectId: string) {
       fadeAudio: project.transitions.fadeAudio,
     },
     audio: project.audio,
+    audioCuts: project.audioCuts.map((c) => ({ start: formatSrtTime(c.startMs), end: formatSrtTime(c.endMs) })),
     subtitlesCount: project.subtitles.length,
     style: project.style,
     issues: validateProject(project),
@@ -333,6 +335,28 @@ export function createMcpServer(base: string): McpServer {
       if (a.splitEvenly) next = { ...next, scenes: splitEvenly(next.scenes, next.output) };
       if (a.fitLastScene) next = { ...next, scenes: fitLastScene(next.scenes, next.output.durationMs) };
       return summary(await saveProject(a.projectId, next), base, a.projectId);
+    }),
+  );
+
+  tool(
+    server,
+    'cut_fragment',
+    {
+      title: 'Вырезать кусок',
+      description:
+        'Вырезает кусок ролика целиком: он пропадает из звука, субтитров и сцен, ролик становится короче. ' +
+        'Время — по звуковой записи (как в исходном видео), вырезы можно делать в любом порядке; уже вырезанное повторно не считается. ' +
+        'Реплики, импортированные после выреза, не сдвигаются — импортируйте субтитры до вырезов.',
+      inputSchema: {
+        projectId: z.string(),
+        startSec: z.number().nonnegative().describe('Начало куска по записи, с'),
+        endSec: z.number().positive().describe('Конец куска по записи, с'),
+      },
+    },
+    safe(async ({ projectId, startSec, endSec }) => {
+      if (endSec <= startSec) throw new HttpError(400, 'Конец куска должен быть позже начала');
+      const p = await loadProject(projectId);
+      return summary(await saveProject(projectId, cutProject(p, ms(startSec), ms(endSec))), base, projectId);
     }),
   );
 

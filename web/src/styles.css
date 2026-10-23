@@ -371,6 +371,18 @@ legend {
   align-self: stretch;
   margin-bottom: 0;
 }
+.audio-cuts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.audio-cuts .row {
+  flex-wrap: wrap;
+}
+.audio-cuts .time-input {
+  width: 76px;
+}
 .audio-name {
   max-width: 100%;
   overflow: hidden;

@@ -61,6 +61,7 @@ export function createProject(name: string): Project {
     scenes: [],
     transitions: { ...DEFAULT_TRANSITIONS },
     audio: null,
+    audioCuts: [],
     style: { ...DEFAULT_STYLE },
     subtitles: [],
   };
@@ -80,6 +81,7 @@ export function normalizeProject(p: Partial<Project> & { meta?: Partial<Project[
     scenes,
     transitions: { ...base.transitions, ...transitions },
     audio: p.audio ?? null,
+    audioCuts: p.audioCuts ?? [],
     style: { ...base.style, ...p.style },
     subtitles: p.subtitles ?? [],
   };

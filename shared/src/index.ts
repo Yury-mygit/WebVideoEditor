@@ -4,5 +4,6 @@ export * from './time';
 export * from './subtitles';
 export * from './project';
 export * from './segments';
+export * from './cuts';
 export * from './ass';
 export * from './validate';

@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   assColor,
+  audioPieces,
+  audioToVideoMs,
   buildAss,
   createProject,
   createScene,
+  cutMarksMs,
+  cutProject,
   cueIssues,
   DEFAULT_OUTPUT,
   DEFAULT_STYLE,
@@ -25,6 +29,7 @@ import {
   splitEvenly,
   totalScenesMs,
   validateProject,
+  videoToAudioMs,
   withIds,
   type Project,
 } from './index';
@@ -208,4 +213,73 @@ test('newId работает и без crypto.randomUUID (сайт по http, н
   } finally {
     Object.defineProperty(globalThis.crypto, 'randomUUID', { value: original, configurable: true });
   }
+});
+
+/** Ролик 100 с: две сцены по 50 с, реплики по 10 с через каждые 20 с. */
+function cutBase(): Project {
+  const p = createProject('t');
+  p.output.durationMs = 100_000;
+  p.scenes = [createScene('a', 50_000), createScene('b', 50_000)];
+  p.subtitles = withIds([0, 20, 40, 60, 80].map((s) => ({ startMs: s * 1000 + 5000, endMs: s * 1000 + 15_000, text: String(s) })));
+  return p;
+}
+
+test('вырез: звук, сцены, реплики и длительность сдвигаются', () => {
+  const p = cutProject(cutBase(), 30_000, 45_000);
+  assert.equal(p.output.durationMs, 85_000);
+  assert.deepEqual(p.scenes.map((s) => s.durationMs), [35_000, 50_000]);
+  // Реплика 25–35 укорочена до склейки, 45–55 → 30–40, остальные после выреза сдвинуты на 15 с.
+  assert.deepEqual(
+    p.subtitles.map((c) => [c.startMs / 1000, c.endMs / 1000]),
+    [[5, 15], [25, 30], [30, 40], [50, 60], [70, 80]],
+  );
+  assert.deepEqual(p.audioCuts, [{ startMs: 30_000, endMs: 45_000 }]);
+});
+
+test('вырезы задаются по времени записи в любом порядке', () => {
+  // Сначала поздний, потом ранний — и наоборот: результат одинаковый.
+  const a = cutProject(cutProject(cutBase(), 60_000, 70_000), 10_000, 20_000);
+  const b = cutProject(cutProject(cutBase(), 10_000, 20_000), 60_000, 70_000);
+  assert.deepEqual(a.audioCuts, b.audioCuts);
+  assert.deepEqual(a.subtitles.map((c) => [c.startMs, c.endMs]), b.subtitles.map((c) => [c.startMs, c.endMs]));
+  assert.equal(a.output.durationMs, 80_000);
+  assert.deepEqual(a.subtitles.map((c) => c.text), ['0', '20', '40', '60', '80']);
+  assert.deepEqual(cutMarksMs(a.audioCuts), [10_000, 50_000]);
+});
+
+test('вырез поверх уже вырезанного не считается дважды', () => {
+  const p = cutProject(cutProject(cutBase(), 30_000, 40_000), 35_000, 50_000);
+  assert.deepEqual(p.audioCuts, [{ startMs: 30_000, endMs: 50_000 }]);
+  assert.equal(p.output.durationMs, 80_000);
+  assert.equal(cutProject(p, 32_000, 48_000), p);
+});
+
+test('вырез начала: сцена укорачивается, ролик начинается с конца выреза', () => {
+  const p = cutProject(cutBase(), 0, 8000);
+  assert.deepEqual(p.scenes.map((s) => s.durationMs), [42_000, 50_000]);
+  assert.deepEqual([p.subtitles[0].startMs, p.subtitles[0].endMs], [0, 7000]);
+});
+
+test('пересчёт времени ролика и записи, куски звука для сборки', () => {
+  const cuts = [
+    { startMs: 10_000, endMs: 20_000 },
+    { startMs: 30_000, endMs: 35_000 },
+  ];
+  assert.equal(videoToAudioMs(cuts, 5000), 5000);
+  assert.equal(videoToAudioMs(cuts, 10_000), 20_000);
+  assert.equal(videoToAudioMs(cuts, 22_000), 37_000);
+  assert.equal(audioToVideoMs(cuts, 15_000), 10_000);
+  assert.equal(audioToVideoMs(cuts, 40_000), 25_000);
+  // Весь ролик 40 с: три куска записи.
+  assert.deepEqual(audioPieces(cuts, 0, 40_000), [
+    { startMs: 0, endMs: 10_000 },
+    { startMs: 20_000, endMs: 30_000 },
+    { startMs: 35_000, endMs: 55_000 },
+  ]);
+  // Тестовый фрагмент 8–14 с ролика — через первую склейку.
+  assert.deepEqual(audioPieces(cuts, 8000, 6000), [
+    { startMs: 8000, endMs: 10_000 },
+    { startMs: 20_000, endMs: 24_000 },
+  ]);
+  assert.deepEqual(audioPieces([], 3000, 2000), [{ startMs: 3000, endMs: 5000 }]);
 });

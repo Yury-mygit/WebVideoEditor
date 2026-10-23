@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildSegments, formatHms, sceneTimeline, type Project } from '@wve/shared';
+import { buildSegments, cutMarksMs, formatHms, sceneTimeline, type Project } from '@wve/shared';
 import { assetLabel } from '../audio';
 
 interface Props {
@@ -114,6 +114,12 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
         ctx.fillStyle = '#fff';
         clippedText(ctx, `♪ ${assetLabel(project.audio)}`, x0 + 6, yAudio, x1 - x0 - 10, ROW_AUDIO);
       }
+      // Места склеек после вырезов.
+      ctx.fillStyle = '#ffd24a';
+      for (const ms of cutMarksMs(project.audioCuts)) {
+        const xm = x(ms);
+        if (xm >= 0 && xm <= width) ctx.fillRect(Math.round(xm) - 1, yAudio, 2, ROW_AUDIO);
+      }
     }
 
     const yCues = yScenes + ROW_SCENES + 6 + audioRow;
@@ -147,7 +153,7 @@ export function Timeline({ project, timeMs, onSeek, selectedIds, issueIds, audio
     const px = x(timeMs);
     ctx.fillStyle = '#ff4040';
     ctx.fillRect(px - 1, 0, 2, height);
-  }, [project.scenes, project.subtitles, project.audio, project.output, segments, audioDurationMs, total, height, audioRow, timeMs, width, span, viewStart, selectedIds, issueIds]);
+  }, [project.scenes, project.subtitles, project.audio, project.audioCuts, project.output, segments, audioDurationMs, total, height, audioRow, timeMs, width, span, viewStart, selectedIds, issueIds]);
 
   const seekFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();

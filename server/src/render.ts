@@ -5,11 +5,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
+  audioPieces,
   buildAss,
   buildSegments,
   msToFrame,
   sliceProject,
   sliceSegments,
+  type AudioCut,
   type Project,
   type RenderJobInfo,
   type RenderRange,
@@ -25,6 +27,8 @@ interface Job extends RenderJobInfo {
   project: Project;
   /** Отрезки с переходами: считаются по всему проекту и режутся по фрагменту. */
   segments: Segment[];
+  /** Куски звуковой записи для собираемого фрагмента (с учётом вырезов). */
+  audioPieces: AudioCut[];
   audioFilter: string | null;
   startedAt: number;
   child: ChildProcess | null;
@@ -58,6 +62,9 @@ function sceneFilter(scene: Scene, input: number, frames: number, w: number, h: 
   );
 }
 
+/** Затухание и нарастание звука на месте выреза, с. */
+const SPLICE_FADE_SEC = 0.03;
+
 function blackFilter(frames: number, w: number, h: number, fps: number, label: string, tail: string): string {
   return `color=c=black:s=${w}x${h}:r=${fps},format=yuv420p,trim=end_frame=${frames},setpts=N/FRAME_RATE/TB${tail}[${label}]`;
 }
@@ -78,8 +85,8 @@ export function audioFadeFilter(project: Project, startMs: number): string | nul
 
 export interface RenderOptions {
   fontsDir: string | null;
-  /** С какого места звуковой дорожки начинать (для тестового фрагмента). */
-  audioStartMs: number;
+  /** Куски звуковой записи, которые идут в ролик подряд (вырезы и начало тестового фрагмента). */
+  audioPieces: readonly AudioCut[];
   /** Фильтр громкости для проявления и затемнения, если нужен. */
   audioFilter: string | null;
 }
@@ -101,7 +108,7 @@ export function buildFfmpegArgs(
   segments: readonly Segment[],
   assRel: string,
   outRel: string,
-  { fontsDir, audioStartMs, audioFilter }: RenderOptions,
+  { fontsDir, audioPieces, audioFilter }: RenderOptions,
 ): string[] {
   const { width: w, height: h, fps } = project.output;
   const args = ['-hide_banner', '-y', '-nostats', '-progress', 'pipe:1'];
@@ -135,14 +142,34 @@ export function buildFfmpegArgs(
   const ass = `ass=${filterPath(assRel)}${fontsDir ? `:fontsdir=${filterPath(fontsDir)}` : ''}`;
   chains.push(`${labels}concat=n=${segments.length}:v=1:a=0,${ass}[out]`);
   // Звук начинается вместе с роликом; всё, что длиннее ролика, отрезается (-t на входе).
+  // С вырезами каждый кусок записи — отдельный вход, куски склеиваются concat.
   const audio: string[] = [];
-  if (project.audio) {
-    args.push('-ss', String(audioStartMs / 1000), '-t', String(project.output.durationMs / 1000), '-i', `assets/${project.audio}`);
+  if (project.audio && audioPieces.length) {
+    const first = inputs;
+    for (const piece of audioPieces) {
+      args.push('-ss', String(piece.startMs / 1000), '-t', String((piece.endMs - piece.startMs) / 1000), '-i', `assets/${project.audio}`);
+      inputs++;
+    }
+    let src = `${first}:a`;
+    if (audioPieces.length > 1) {
+      // Короткое затухание и нарастание на склейках, чтобы не было щелчков.
+      const labels = audioPieces.map((piece, j) => {
+        const len = (piece.endMs - piece.startMs) / 1000;
+        const fades = [
+          ...(j > 0 ? [`afade=t=in:d=${SPLICE_FADE_SEC}`] : []),
+          ...(j < audioPieces.length - 1 ? [`afade=t=out:st=${Math.max(0, len - SPLICE_FADE_SEC)}:d=${SPLICE_FADE_SEC}`] : []),
+        ];
+        chains.push(`[${first + j}:a]${fades.join(',')}[ap${j}]`);
+        return `[ap${j}]`;
+      });
+      chains.push(`${labels.join('')}concat=n=${audioPieces.length}:v=0:a=1[acat]`);
+      src = 'acat';
+    }
     if (audioFilter) {
-      chains.push(`[${inputs}:a]${audioFilter}[aout]`);
+      chains.push(`[${src}]${audioFilter}[aout]`);
       audio.push('-map', '[aout]');
     } else {
-      audio.push('-map', `${inputs}:a:0`);
+      audio.push('-map', src === 'acat' ? '[acat]' : `${src}:0`);
     }
     audio.push('-c:a', 'aac', '-b:a', '160k');
   }
@@ -211,6 +238,11 @@ export async function enqueueRender(projectId: string, project: Project, range: 
     range,
     project: range ? sliceProject(project, range) : project,
     segments,
+    audioPieces: audioPieces(
+      project.audioCuts,
+      range?.startMs ?? 0,
+      (range ? Math.min(durationMs, range.startMs + range.durationMs) : durationMs) - (range?.startMs ?? 0),
+    ),
     audioFilter: audioFadeFilter(project, range?.startMs ?? 0),
     startedAt: 0,
     child: null,
@@ -275,7 +307,7 @@ async function runJob(job: Job): Promise<void> {
   const fontsDir = existsSync(config.fontsDir) ? config.fontsDir : null;
   const args = buildFfmpegArgs(project, job.segments, job.assFile, job.partFile, {
     fontsDir,
-    audioStartMs: job.range?.startMs ?? 0,
+    audioPieces: job.audioPieces,
     audioFilter: job.audioFilter,
   });
   job.log.write(`[server] cwd: ${cwd}\n[server] ${config.ffmpegPath} ${args.map((a) => (/\s|;/.test(a) ? `"${a}"` : a)).join(' ')}\n\n`);
